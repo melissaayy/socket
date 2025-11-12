@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #define BACKLOG 10 
+#define DEF_CONF_REPLY_SENDER 1
 
 struct stUserCommand
 {
@@ -50,11 +51,11 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 	char *strPortSlice; 
 	// cli param 1: size of message length 
 	stProcessedUserCommand.i8MessageLen = (uint16_t) asciiToDecimal(argv[1] + 1);
-	printf("stProcessedUserCommand.i8MessageLen: %d \n", stProcessedUserCommand.i8MessageLen);
+	//printf("stProcessedUserCommand.i8MessageLen: %d \n", stProcessedUserCommand.i8MessageLen);
 
 	// cli param 2: offset
 	stProcessedUserCommand.i8Offset = (uint16_t) asciiToDecimal(argv[2] + 1); 
-	printf("stProcessedUserCommand.i8Offset: %d \n", stProcessedUserCommand.i8Offset);
+	//printf("stProcessedUserCommand.i8Offset: %d \n", stProcessedUserCommand.i8Offset);
 
 	// cli param 3: port number 
 		// strPortSlice = (char *)(argv[3]+1);  		// this is for receiving more than one port number, need more handling, thinking of using an enum 
@@ -67,14 +68,23 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 		//     token = strtok(NULL, ":");
 		// }
 	stProcessedUserCommand.cpPortNum = (argv[3] + 1); 
-	printf("stProcessedUserCommand.cpPortNum: %s \n", stProcessedUserCommand.cpPortNum);
+	//printf("stProcessedUserCommand.cpPortNum: %s \n", stProcessedUserCommand.cpPortNum);
 
 	// cli param 4: read message format 
 	stProcessedUserCommand.i8MsgFormat = asciiToDecimal(argv[4] + 1); 
-	printf("stProcessedUserCommand.i8MsgFormat: %d \n", stProcessedUserCommand.i8MsgFormat);
+	//printf("stProcessedUserCommand.i8MsgFormat: %d \n", stProcessedUserCommand.i8MsgFormat);
 
 	// cli param 5: reply to sender 
-	stProcessedUserCommand.i8ReplyToSender = asciiToDecimal(argv[5] + 1); 
+
+	if(argv[5] != NULL)
+	{
+		stProcessedUserCommand.i8ReplyToSender = asciiToDecimal(argv[5] + 1); 
+	}
+
+	else 
+	{
+		stProcessedUserCommand.i8ReplyToSender = DEF_CONF_REPLY_SENDER; 
+	}
 	printf("stProcessedUserCommand.i8ReplyToSender: %d \n", stProcessedUserCommand.i8ReplyToSender);
 
 	return stProcessedUserCommand; 
@@ -111,10 +121,11 @@ int main(int argc, char const* argv[])
 	struct sockaddr_storage their_addr; 
 	char s[INET6_ADDRSTRLEN];
 	char* strToSend = "Hello from server! banana \n";
-	char strToRecv[255]; 
+	char strToRecv[stUserCommandConfig.i8MessageLen]; 
 	char* strToSendBack; 
-	int numBytesRecv; 
+	uint16_t numBytesRecv; 
 	uint16_t u16NumclientConn = 0; 
+	pid_t childpid;
 
 	memset(&hints,0, sizeof(hints)); 
 	hints.ai_family = AF_UNSPEC; 
@@ -182,7 +193,6 @@ int main(int argc, char const* argv[])
 		send(new_fd, strToSend, strlen(strToSend), 0);
 
 		// Child process id
-		pid_t childpid;
 		if((childpid = fork()) == 0)
 		{
 			printf("server: you are client number %d\n", u16NumclientConn); 
@@ -196,6 +206,7 @@ int main(int argc, char const* argv[])
 			while(1)
 			{
 				numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
+				// printf("server: numBytesRecv %d\n", numBytesRecv); 
 
 				if (numBytesRecv == -1)
 				{
@@ -212,8 +223,8 @@ int main(int argc, char const* argv[])
 
 				// Null-terminate received string
 				strToRecv[numBytesRecv] = '\0'; // this wun work cuz im recv raw hexa value, its not a string 
-				printf("number of bytes recv: %d \n", numBytesRecv); 
-				printf("server: received '%s'\n", strToRecv);
+				//printf("number of bytes recv: %d \n", numBytesRecv); 
+				printf("server: received \n%s\n", strToRecv);
 
 
 				// need to process the string we recv 
@@ -224,15 +235,15 @@ int main(int argc, char const* argv[])
 		
 
 				// Validate bounds
-				if (stUserCommandConfig.i8Offset + stUserCommandConfig.i8MessageLen > numBytesRecv) {
-					fprintf(stderr, "Invalid offset/length: out of bounds\n");
-					continue;
-				}
+				// if (stUserCommandConfig.i8Offset + stUserCommandConfig.i8MessageLen > numBytesRecv) {
+				// 	fprintf(stderr, "Invalid offset/length: out of bounds\n");
+				// 	continue;
+				// }
 
 				// process the data to be sent back (using the offset and the length)
 				// strToSendBack = strToRecv + stUserCommandConfig.i8MessageLen + stUserCommandConfig.i8Offset; 
-				strToSendBack = strToRecv + stUserCommandConfig.i8Offset; 
-				printf("server: send back '%s'\n", strToSendBack);
+				// strToSendBack = strToRecv + stUserCommandConfig.i8Offset; 
+				// printf("server: send back '%s'\n", strToSendBack);
 
 				// check which sender to send back to 
 
@@ -258,3 +269,6 @@ int main(int argc, char const* argv[])
 
 	return 0; 
 }
+
+
+
