@@ -16,7 +16,7 @@ struct stUserCommand
 	uint16_t i8Offset;
 	const char * cpPortNum;
 	int i8MsgFormat; 
-	int i8ReplyToSender;
+	int i8ReplyToWhichClient;
 }; 
 
 /*
@@ -78,14 +78,14 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 
 	if(argv[5] != NULL)
 	{
-		stProcessedUserCommand.i8ReplyToSender = asciiToDecimal(argv[5] + 1); 
+		stProcessedUserCommand.i8ReplyToWhichClient = asciiToDecimal(argv[5] + 1); 
 	}
 
 	else 
 	{
-		stProcessedUserCommand.i8ReplyToSender = DEF_CONF_REPLY_SENDER; 
+		stProcessedUserCommand.i8ReplyToWhichClient = DEF_CONF_REPLY_SENDER; 
 	}
-	printf("stProcessedUserCommand.i8ReplyToSender: %d \n", stProcessedUserCommand.i8ReplyToSender);
+	printf("stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
 
 	return stProcessedUserCommand; 
 }
@@ -125,7 +125,7 @@ int main(int argc, char const* argv[])
 	char* strToSendBack; 
 	uint16_t numBytesRecv; 
 	uint16_t u16NumclientConn = 0; 
-	pid_t childpid;
+	pid_t childpid, proccessPidArr[100];
 
 	memset(&hints,0, sizeof(hints)); 
 	hints.ai_family = AF_UNSPEC; 
@@ -195,6 +195,9 @@ int main(int argc, char const* argv[])
 		// Child process id
 		if((childpid = fork()) == 0)
 		{
+			proccessPidArr[u16NumclientConn] = getpid(); // we need this process id to determine which client to send the data to 
+			printf("server: proccessPidArr[u16NumclientConn] %d\n", proccessPidArr[u16NumclientConn]); 
+
 			printf("server: you are client number %d\n", u16NumclientConn); 
 
 			// closing server socket ID cux the child done need the listening socket 
@@ -251,7 +254,21 @@ int main(int argc, char const* argv[])
 				// send back the recv string to the user 
 				// (this is initial implementation to ensure i can send back to user)
 				// later on we will send the manipulated data back 
-				send(new_fd, strToRecv, strlen(strToRecv), 0 ); 
+
+				if( stUserCommandConfig.i8ReplyToWhichClient == DEF_CONF_REPLY_SENDER)
+				{
+					send(new_fd, strToRecv, strlen(strToRecv), 0 ); 
+				}
+
+				else if ( stUserCommandConfig.i8ReplyToWhichClient == 2)
+				{
+					send(proccessPidArr[u16NumclientConn], strToRecv, strlen(strToRecv), 0 ); 
+				}
+
+				else if( (stUserCommandConfig.i8ReplyToWhichClient == 0))
+				{
+					send(proccessPidArr[1], strToRecv, strlen(strToRecv), 0 ); 
+				}
 
 
 				// compare received string with "close"
