@@ -247,6 +247,12 @@ int main(int argc, char const* argv[])
 
 				// check which sender to send back to 
 
+				
+				// send back the recv string to the user 
+				// (this is initial implementation to ensure i can send back to user)
+				// later on we will send the manipulated data back 
+				send(new_fd, strToRecv, strlen(strToRecv), 0 ); 
+
 
 				// compare received string with "close"
 				if (strcmp(strToRecv, "clear") == 0) {
@@ -269,6 +275,3 @@ int main(int argc, char const* argv[])
 
 	return 0; 
 }
-
-
-
