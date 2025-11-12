@@ -110,10 +110,11 @@ int main(int argc, char const* argv[])
 	socklen_t sin_size; 
 	struct sockaddr_storage their_addr; 
 	char s[INET6_ADDRSTRLEN];
-	char* strToSend = "Hello from server! banana";
+	char* strToSend = "Hello from server! banana \n";
 	char strToRecv[255]; 
 	char* strToSendBack; 
 	int numBytesRecv; 
+	uint16_t u16NumclientConn = 0; 
 
 	memset(&hints,0, sizeof(hints)); 
 	hints.ai_family = AF_UNSPEC; 
@@ -168,7 +169,8 @@ int main(int argc, char const* argv[])
 	{
 		sin_size = sizeof(their_addr); 
 		new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); 
-		
+		u16NumclientConn ++; // id-ing which client has connected 
+
 		if (new_fd == -1) 
 		{
 			perror("Err: accept"); 
@@ -179,60 +181,80 @@ int main(int argc, char const* argv[])
 		printf("server: got connection from %s\n", s); 
 		send(new_fd, strToSend, strlen(strToSend), 0);
 
-		while(1)
+		// Child process id
+		pid_t childpid;
+		if((childpid = fork()) == 0)
 		{
-			numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
+			printf("server: you are client number %d\n", u16NumclientConn); 
 
-			if (numBytesRecv == -1)
+			// closing server socket ID cux the child done need the listening socket 
+			close(sockfd); 
+
+			// send confimation message to the client 
+			send(new_fd, "hi client, you are now connected \n", strlen("hi client, you are now connected \n"), 0 ); 
+
+			while(1)
 			{
-				perror("Err: recv error \n"); 
-				close(new_fd); 
-				continue;
+				numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
+
+				if (numBytesRecv == -1)
+				{
+					perror("Err: recv error \n"); 
+					close(new_fd); 
+					continue;
+				}
+
+				if(numBytesRecv == 0)
+				{
+					printf("client has disconnected \n"); 
+					break; 
+				}
+
+				// Null-terminate received string
+				strToRecv[numBytesRecv] = '\0'; // this wun work cuz im recv raw hexa value, its not a string 
+				printf("number of bytes recv: %d \n", numBytesRecv); 
+				printf("server: received '%s'\n", strToRecv);
+
+
+				// need to process the string we recv 
+				// chop up the string, the first byte will tell us the offset
+				// the next 4 bytes will tell us the length of data we would want to extract and process 
+				// need to know whether to send the data back as what format 
+				// NOTE: need to check how to ensure that the data recv is per expectation, cuz recv many not always be complete 
+		
+
+				// Validate bounds
+				if (stUserCommandConfig.i8Offset + stUserCommandConfig.i8MessageLen > numBytesRecv) {
+					fprintf(stderr, "Invalid offset/length: out of bounds\n");
+					continue;
+				}
+
+				// process the data to be sent back (using the offset and the length)
+				// strToSendBack = strToRecv + stUserCommandConfig.i8MessageLen + stUserCommandConfig.i8Offset; 
+				strToSendBack = strToRecv + stUserCommandConfig.i8Offset; 
+				printf("server: send back '%s'\n", strToSendBack);
+
+				// check which sender to send back to 
+
+
+				// compare received string with "close"
+				if (strcmp(strToRecv, "clear") == 0) {
+					//printf("server: received close command, shutting down.\n");
+					//close(new_fd);
+					//close(sockfd);
+					////break; // exit the loop and terminate server
+					//exit(1); 
+					system("clear");  // For Linux/macOS
+				}
 			}
 
-			// Null-terminate received string
-			strToRecv[numBytesRecv] = '\0'; // this wun work cuz im recv raw hexa value, its not a string 
-			printf("number of bytes recv: %d \n", numBytesRecv); 
-			printf("server: received '%s'\n", strToRecv);
-
-
-			// need to process the string we recv 
-			// chop up the string, the first byte will tell us the offset
-			// the next 4 bytes will tell us the length of data we would want to extract and process 
-			// need to know whether to send the data back as what format 
-			// NOTE: need to check how to ensure that the data recv is per expectation, cuz recv many not always be complete 
-	
-
-			// Validate bounds
-			if (stUserCommandConfig.i8Offset + stUserCommandConfig.i8MessageLen > numBytesRecv) {
-				fprintf(stderr, "Invalid offset/length: out of bounds\n");
-				continue;
-			}
-
-			// process the data to be sent back (using the offset and the length)
-			// strToSendBack = strToRecv + stUserCommandConfig.i8MessageLen + stUserCommandConfig.i8Offset; 
-			strToSendBack = strToRecv + stUserCommandConfig.i8Offset; 
-			printf("server: send back '%s'\n", strToSendBack);
-
-
-			// check which sender to send back to 
-
-
-			// compare received string with "close"
-			if (strcmp(strToRecv, "clear") == 0) {
-				//printf("server: received close command, shutting down.\n");
-				//close(new_fd);
-				//close(sockfd);
-				////break; // exit the loop and terminate server
-				//exit(1); 
-				system("clear");  // For Linux/macOS
-			}
+			close(new_fd);
+			printf("server: client number %d disconnected\n", u16NumclientConn); 
+			//u16NumclientConn --; 
+			exit(0);
+			
 		}
-
 	}
 
 	return 0; 
 }
-
-
-
