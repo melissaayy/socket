@@ -125,7 +125,18 @@ int main(int argc, char const* argv[])
 	char* strToSendBack; 
 	uint16_t numBytesRecv; 
 	uint16_t u16NumclientConn = 0; 
-	pid_t childpid, proccessPidArr[100];
+	pid_t tForkPid, proccessPidArr[100];
+
+	int i8ClientSockets[255] = {0}; 
+	int i8PipeArr[255][2]; 
+
+	fd_set readfds; 
+	int max_fd; 
+
+	// int i8PipeArr1[2], i8PipeArr2[2]; //i8PipeArr[0] is read, i8PipeArr[1] is write 
+	// pipe(i8PipeArr1); // child -> parent 
+	// pipe(i8PipeArr2); // parent -> child 
+	char buffer[stUserCommandConfig.i8MessageLen];
 
 	memset(&hints,0, sizeof(hints)); 
 	hints.ai_family = AF_UNSPEC; 
@@ -176,117 +187,161 @@ int main(int argc, char const* argv[])
 		exit(1); 
 	}
 
-	while(1) // main accept() loop
+	while(1) // main loop
 	{
-		sin_size = sizeof(their_addr); 
-		new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); 
-		u16NumclientConn ++; // id-ing which client has connected 
+		// setting up the select() function which will help us determine which client has sent data to the server 
+		FD_ZERO(&readfds);         // clears the readfds set, a set is used by select() to keep track of file descriptors 
+		FD_SET(sockfd, &readfds);  // adding the sockfd file descriptor to the sockfd set, this is adding the listening socket 
+		max_fd = sockfd; 
 
-		if (new_fd == -1) 
+		// now we will add in each pipe's read end 
+		for(int i = 0; i < u16NumclientConn; i++)
 		{
-			perror("Err: accept"); 
-			continue; 
+			if (i8PipeArr[i][0] != -1)   // Only add valid FDs
+			{
+				FD_SET(i8PipeArr[i][0], &readfds); // we are writing the read FD into the set 
+				if(i8PipeArr[i][0] > max_fd )
+				{
+					max_fd = i8PipeArr[i][0]; 
+				}
+			}
 		}
 
-		inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s); 
-		printf("server: got connection from %s\n", s); 
-		send(new_fd, strToSend, strlen(strToSend), 0);
+		// then we run select (waiting for activity)
+		int activity = select(max_fd + 1, &readfds, NULL, NULL, NULL);
 
-		// Child process id
-		if((childpid = fork()) == 0)
+		if (activity < 0) 
 		{
-			proccessPidArr[u16NumclientConn] = getpid(); // we need this process id to determine which client to send the data to 
-			printf("server: proccessPidArr[u16NumclientConn] %d\n", proccessPidArr[u16NumclientConn]); 
+			perror("Err: select");
+            continue;
+		}
 
+		// then check which FDs are ready 
+		// if server's FD is ready then can be ready to accept client connection 
+		if (FD_ISSET(sockfd, &readfds))
+		{
+			sin_size = sizeof(their_addr); 
+			new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); 
+			if (new_fd == -1) 
+			{
+				perror("Err: accept"); 
+				continue; 
+			}
+			i8ClientSockets[u16NumclientConn] = new_fd;
+
+
+			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s); 
+			printf("server: got connection from %s\n", s); 
 			printf("server: you are client number %d\n", u16NumclientConn); 
 
-			// closing server socket ID cux the child done need the listening socket 
-			close(sockfd); 
-
-			// send confimation message to the client 
-			send(new_fd, "hi client, you are now connected \n", strlen("hi client, you are now connected \n"), 0 ); 
-
-			while(1)
+			//create a new pipe for this child 
+			if(pipe(i8PipeArr[u16NumclientConn]) == -1)
 			{
-				numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
-				// printf("server: numBytesRecv %d\n", numBytesRecv); 
+				perror("Err: pipe creation fail"); 
+				close(new_fd); 
+				continue;
+			}
 
-				if (numBytesRecv == -1)
+			// creation child and parent process 
+			tForkPid = fork();
+
+			if(tForkPid == 0) //child process
+			{
+				close(sockfd); // since it child process we can close the listening socket 
+				close(i8PipeArr[u16NumclientConn][0]); // close the reading pipe 
+
+				send(new_fd, "papaya hi client, you are now connected \n", strlen("hi client, you are now connected \n"), 0 );  // send confimation message to the client 
+
+				// process data recv from client 
+				while(1) 
 				{
-					perror("Err: recv error \n"); 
-					close(new_fd); 
-					continue;
-				}
+					numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
 
-				if(numBytesRecv == 0)
-				{
-					printf("client has disconnected \n"); 
-					break; 
-				}
+					if (numBytesRecv == -1)
+					{
+						perror("Err: recv error \n"); 
+						close(new_fd); 
+						continue;
+					}
 
-				// Null-terminate received string
-				strToRecv[numBytesRecv] = '\0'; // this wun work cuz im recv raw hexa value, its not a string 
-				//printf("number of bytes recv: %d \n", numBytesRecv); 
-				printf("server: received \n%s\n", strToRecv);
+					if(numBytesRecv == 0)
+					{
+						printf("client has disconnected \n"); 
+						break; 
+					}
 
+					strToRecv[numBytesRecv] = '\0'; // Null-terminate received string
+					printf("server: received \n%s\n", strToRecv);
 
-				// need to process the string we recv 
-				// chop up the string, the first byte will tell us the offset
-				// the next 4 bytes will tell us the length of data we would want to extract and process 
-				// need to know whether to send the data back as what format 
-				// NOTE: need to check how to ensure that the data recv is per expectation, cuz recv many not always be complete 
-		
-
-				// Validate bounds
-				// if (stUserCommandConfig.i8Offset + stUserCommandConfig.i8MessageLen > numBytesRecv) {
-				// 	fprintf(stderr, "Invalid offset/length: out of bounds\n");
-				// 	continue;
-				// }
-
-				// process the data to be sent back (using the offset and the length)
-				// strToSendBack = strToRecv + stUserCommandConfig.i8MessageLen + stUserCommandConfig.i8Offset; 
-				// strToSendBack = strToRecv + stUserCommandConfig.i8Offset; 
-				// printf("server: send back '%s'\n", strToSendBack);
-
-				// check which sender to send back to 
-
-				
-				// send back the recv string to the user 
-				// (this is initial implementation to ensure i can send back to user)
-				// later on we will send the manipulated data back 
-
-				if( stUserCommandConfig.i8ReplyToWhichClient == DEF_CONF_REPLY_SENDER)
-				{
-					send(new_fd, strToRecv, strlen(strToRecv), 0 ); 
-				}
-
-				else if ( stUserCommandConfig.i8ReplyToWhichClient == 2)
-				{
-					send(proccessPidArr[u16NumclientConn], strToRecv, strlen(strToRecv), 0 ); 
-				}
-
-				else if( (stUserCommandConfig.i8ReplyToWhichClient == 0))
-				{
-					send(proccessPidArr[1], strToRecv, strlen(strToRecv), 0 ); 
-				}
-
-
-				// compare received string with "close"
-				if (strcmp(strToRecv, "clear") == 0) {
-					//printf("server: received close command, shutting down.\n");
-					//close(new_fd);
-					//close(sockfd);
-					////break; // exit the loop and terminate server
-					//exit(1); 
-					system("clear");  // For Linux/macOS
+					// write to the pipe 
+					write(i8PipeArr[u16NumclientConn][1], strToRecv, strlen(strToRecv)+1 ); 
 				}
 			}
 
-			close(new_fd);
-			printf("server: client number %d disconnected\n", u16NumclientConn); 
-			//u16NumclientConn --; 
-			exit(0);
-			
+			else // parent process 
+			{
+				// close the writing pipe 
+				close(i8PipeArr[u16NumclientConn][1]);
+
+				// increment the number of clients 
+				u16NumclientConn++;
+
+			}
+		}
+
+
+		// read from the pipe 
+		for (int i = 0; i < u16NumclientConn; i++)
+		{
+			if(FD_ISSET(i8PipeArr[i][0], &readfds))
+			{
+				int bytesRead = read(i8PipeArr[i][0], strToRecv, sizeof(strToRecv)); 
+				if(bytesRead > 0)
+				{
+					buffer[bytesRead] = '\0';
+					//printf("server: received \n%s\n", strToRecv);
+					send(i8ClientSockets[i], strToRecv, strlen(strToRecv), 0 );  // send confimation message to the client 
+
+					if( stUserCommandConfig.i8ReplyToWhichClient == DEF_CONF_REPLY_SENDER)
+					{
+						send(i8ClientSockets[u16NumclientConn], buffer, strlen(buffer), 0 );  
+						printf("u16NumclientConn %d \n", u16NumclientConn);
+					}
+
+					else if ( stUserCommandConfig.i8ReplyToWhichClient == 2) // send to latest connection
+					{
+						send(i8ClientSockets[new_fd], strToRecv, strlen(strToRecv), 0 ); // this is the current client (reason is this value holds the latest connection)
+						// write(i8pipeArr1[1], strToRecv, strlen(strToRecv)+1);
+						// read(i8pipeArr2[0], buffer, sizeof(buffer));
+					}
+
+					else if( (stUserCommandConfig.i8ReplyToWhichClient == 0)) // send to first available client 
+					{
+						send(i8ClientSockets[0], strToRecv, strlen(strToRecv), 0 ); 
+					}
+
+				}
+				else 
+				{
+					
+                    printf("Client %d disconnected. Cleaning up...\n", i);
+					close(i8PipeArr[i][0]);
+					close(i8ClientSockets[i]); 
+					
+					// shifts array 
+                    for (int j = i; j < u16NumclientConn - 1; j++) {
+                        i8ClientSockets[j] = i8ClientSockets[j + 1];
+                        i8PipeArr[j][0] = i8PipeArr[j + 1][0];
+                    }
+                    u16NumclientConn--;
+
+					// Clear last slot to avoid stale FD
+					i8ClientSockets[u16NumclientConn] = -1;
+					i8PipeArr[u16NumclientConn][0] = -1;
+
+					i--; // Adjust index after removal
+				}
+			}
 		}
 	}
 
