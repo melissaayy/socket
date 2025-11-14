@@ -197,9 +197,14 @@ int main(int argc, char const* argv[])
 		// now we will add in each pipe's read end 
 		for(int i = 0; i < u16NumclientConn; i++)
 		{
-			if (i8PipeArr[i][0] != -1)   // Only add valid FDs
+			// printf("yiyiyiyiyi [u16NumclientConn]is %d yiyiyiyiyi \n", u16NumclientConn);
+			// printf("yayayayaya i8PipeArr[i][0] is %d yayayayya \n\n", i8PipeArr[i][0]);
+
+			if (i8PipeArr[i][0] >= 0)   // Only add valid FDs
 			{
-				FD_SET(i8PipeArr[i][0], &readfds); // we are writing the read FD into the set 
+				FD_SET(i8PipeArr[i][0], &readfds); // we are writing the read FD into the set
+				//printf("hohohohoho readfds is %d hohohohoho \n\n", readfds);
+
 				if(i8PipeArr[i][0] > max_fd )
 				{
 					max_fd = i8PipeArr[i][0]; 
@@ -212,7 +217,7 @@ int main(int argc, char const* argv[])
 
 		if (activity < 0) 
 		{
-			perror("Err: select");
+			//perror("Err: select");
             continue;
 		}
 
@@ -221,7 +226,8 @@ int main(int argc, char const* argv[])
 		if (FD_ISSET(sockfd, &readfds))
 		{
 			sin_size = sizeof(their_addr); 
-			new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); 
+			new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); // accept() is blocking, means that if no conn req, 
+																				// the below codes will not cont execution 
 			if (new_fd == -1) 
 			{
 				perror("Err: accept"); 
@@ -276,6 +282,8 @@ int main(int argc, char const* argv[])
 					// write to the pipe 
 					write(i8PipeArr[u16NumclientConn][1], strToRecv, strlen(strToRecv)+1 ); 
 				}
+				close(new_fd);
+				exit(0);
 			}
 
 			else // parent process 
@@ -300,23 +308,23 @@ int main(int argc, char const* argv[])
 				{
 					buffer[bytesRead] = '\0';
 					//printf("server: received \n%s\n", strToRecv);
-					send(i8ClientSockets[i], strToRecv, strlen(strToRecv), 0 );  // send confimation message to the client 
+					//send(i8ClientSockets[i], strToRecv, strlen(strToRecv), 0 );  // send confimation message to the client 
 
 					if( stUserCommandConfig.i8ReplyToWhichClient == DEF_CONF_REPLY_SENDER)
 					{
-						send(i8ClientSockets[u16NumclientConn], buffer, strlen(buffer), 0 );  
-						printf("u16NumclientConn %d \n", u16NumclientConn);
+						send(i8ClientSockets[i], strToRecv, strlen(strToRecv), 0 );  
+						//printf("u16NumclientConn %d \n", u16NumclientConn);
 					}
 
-					else if ( stUserCommandConfig.i8ReplyToWhichClient == 2) // send to latest connection
+					else if (stUserCommandConfig.i8ReplyToWhichClient == 2) // send to latest connection
 					{
-						send(i8ClientSockets[new_fd], strToRecv, strlen(strToRecv), 0 ); // this is the current client (reason is this value holds the latest connection)
-						// write(i8pipeArr1[1], strToRecv, strlen(strToRecv)+1);
-						// read(i8pipeArr2[0], buffer, sizeof(buffer));
+						send(i8ClientSockets[u16NumclientConn-1], strToRecv, strlen(strToRecv), 0 ); // this is the current client (reason is this value holds the latest connection)
+						//printf("potato \n");
 					}
 
 					else if( (stUserCommandConfig.i8ReplyToWhichClient == 0)) // send to first available client 
 					{
+						//printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
 						send(i8ClientSockets[0], strToRecv, strlen(strToRecv), 0 ); 
 					}
 
@@ -339,6 +347,10 @@ int main(int argc, char const* argv[])
 					i8ClientSockets[u16NumclientConn] = -1;
 					i8PipeArr[u16NumclientConn][0] = -1;
 
+
+					// printf("i8ClientSockets[u16NumclientConn] is %d \n", i8ClientSockets[u16NumclientConn]);
+					// printf("i8PipeArr[u16NumclientConn][0] is %d \n", i8PipeArr[u16NumclientConn][0]);
+				
 					i--; // Adjust index after removal
 				}
 			}
