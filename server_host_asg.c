@@ -11,6 +11,9 @@
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
 
+int i8ClientSockets[255] = {0}; 
+uint16_t u16NumclientConn = 0; 
+
 struct stUserCommand
 {
 	uint16_t i8MessageLen;
@@ -91,6 +94,43 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 	return stProcessedUserCommand; 
 }
 
+
+bool processSendToWhichClient(int u8ClientConf , char * finalToSend)
+{
+	uint16_t u16BytesSent = 0; 
+	bool boSendClientResult = false; 
+
+	if(u8ClientConf == DEF_CONF_REPLY_SENDER)
+	{
+		u16BytesSent = send(i8ClientSockets[u16NumclientConn], finalToSend, strlen(finalToSend), 0 );  
+		//printf("u16NumclientConn %d \n", u16NumclientConn);
+	}
+
+	else if (u8ClientConf == 2) // send to latest connection
+	{
+		//u16BytesSent = send(i8ClientSockets[u16NumclientConn-1], finalToSend, strlen(finalToSend), 0 ); // this is the current client (reason is this value holds the latest connection)
+		//printf("potato \n");
+	}
+
+	else if( (u8ClientConf == 0)) // send to first available client 
+	{
+		//u16BytesSent = printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
+		//send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 ); 
+	}
+
+	if(u16BytesSent == -1)
+	{
+		boSendClientResult = false; 
+	}
+
+	else
+	{
+		boSendClientResult = true; 
+	}
+
+	return boSendClientResult; 
+}
+
 /*
  * Function: Obtain IP address (IPv4 or IPv6) 
  * Input: pointer to sockaddr structure  
@@ -109,7 +149,7 @@ void * get_in_addr(struct sockaddr * sa)
 	} 
 } 
 
-					bool boPrint = false; 
+bool boPrint = false; 
 
 int main(int argc, char const* argv[]) 
 {
@@ -127,18 +167,13 @@ int main(int argc, char const* argv[])
 	char strToRecv[30000]; 
 	char* strToSendBack; 
 	uint16_t numBytesRecv; 
-	uint16_t u16NumclientConn = 0; 
+	uint16_t totalBytesRecv; 
 	pid_t tForkPid, proccessPidArr[100];
 
-	int i8ClientSockets[255] = {0}; 
-	int i8PipeArr[255][2]; 
 
 	fd_set readfds; // select can monitor 3 sets of descriptors 
 	int max_fd; 
 
-	// int i8PipeArr1[2], i8PipeArr2[2]; //i8PipeArr[0] is read, i8PipeArr[1] is write 
-	// pipe(i8PipeArr1); // child -> parent 
-	// pipe(i8PipeArr2); // parent -> child 
 	char buffer[stUserCommandConfig.i8MessageLen];
 
 	memset(&hints,0, sizeof(hints)); 
@@ -161,7 +196,7 @@ int main(int argc, char const* argv[])
 		}
 		
 		int yes = 1;
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) { // check whether this is really needed 
 			perror("setsockopt");
 			exit(1);
 		}
@@ -197,30 +232,12 @@ int main(int argc, char const* argv[])
 		FD_SET(sockfd, &readfds);  // adding the sockfd file descriptor to the sockfd set, this is adding the listening socket 
 		max_fd = sockfd; 
 
-		// now we will add in each pipe's read end 
-		for(int i = 0; i < u16NumclientConn; i++)
-		{
-			// printf("yiyiyiyiyi [u16NumclientConn]is %d yiyiyiyiyi \n", u16NumclientConn);
-			// printf("yayayayaya i8PipeArr[i][0] is %d yayayayya \n\n", i8PipeArr[i][0]);
-
-			if (i8PipeArr[i][0] >= 0)   // Only add valid FDs
-			{
-				FD_SET(i8PipeArr[i][0], &readfds); // we are writing the read FD into the set
-				//printf("hohohohoho readfds is %d hohohohoho \n\n", readfds);
-
-				if(i8PipeArr[i][0] > max_fd )
-				{
-					max_fd = i8PipeArr[i][0]; 
-				}
-			}
-		}
-
 		// then we run select (waiting for activity)
 		int activity = select(max_fd + 1, &readfds, NULL, NULL, NULL);
 
 		if (activity < 0) 
 		{
-			//perror("Err: select");
+			perror("Err: select");
             continue;
 		}
 
@@ -230,183 +247,119 @@ int main(int argc, char const* argv[])
 		{
 			sin_size = sizeof(their_addr); 
 			new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); // accept() is blocking, means that if no conn req, 
-																				// the below codes will not cont execution 
+																					// the below codes will not cont execution 
 			if (new_fd == -1) 
 			{
 				perror("Err: accept"); 
 				continue; 
 			}
-			i8ClientSockets[u16NumclientConn] = new_fd;
 
+			// increment the number of clients 
+			u16NumclientConn++;
+
+			i8ClientSockets[u16NumclientConn] = new_fd;
 
 			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s); 
 			printf("server: got connection from %s\n", s); 
 			printf("server: you are client number %d\n", u16NumclientConn); 
 
-			//create a new pipe for this child 
-			if(pipe(i8PipeArr[u16NumclientConn]) == -1)
+			// process data recv from client 
+			while(1) 
 			{
-				perror("Err: pipe creation fail"); 
-				close(new_fd); 
-				continue;
-			}
+				numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, MSG_PEEK); 
 
-			// creation child and parent process 
-			tForkPid = fork();
-
-			if(tForkPid == 0) //child process
-			{
-				close(sockfd); // since it child process we can close the listening socket 
-				close(i8PipeArr[u16NumclientConn][0]); // close the reading pipe 
-
-				send(new_fd, "papaya hi client, you are now connected \n", strlen("hi client, you are now connected \n"), 0 );  // send confimation message to the client 
-
-				// process data recv from client 
-				while(1) 
+				if (numBytesRecv == -1)
 				{
-					numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, MSG_PEEK); 
+					perror("Err: recv error \n"); 
+					close(new_fd); 
+					continue;
+				}
 
-					if (numBytesRecv == -1)
-					{
-						perror("Err: recv error \n"); 
-						close(new_fd); 
-						continue;
-					}
+				if(numBytesRecv == 0)
+				{
+					printf("client has disconnected \n"); 
+					break; 
+				}
 
-					if(numBytesRecv == 0)
-					{
-						printf("client has disconnected \n"); 
-						break; 
-					}
-
-					strToRecv[numBytesRecv] = '\0'; // Null-terminate received string
+				strToRecv[numBytesRecv] = '\0'; // Null-terminate received string
+				// printf("server: received \n%s\n", strToRecv);
+				if(!boPrint)
+				{
 					//printf("server: received \n%s\n", strToRecv);
+					//boPrint = true; 
+				}
 
-					// before writing to the pipe we would like to process the data based on the L and O from CLI
-					// to know where is the length information, we would need to use the offset 
-					char cMsgAfterOffset[255];
-					char cMsgLenConf[255]; 
+
+				// process the data based on the L and O from CLI
+				// to know where is the length information, we would need to use the offset 
+				char cMsgAfterOffset[255];
+				char cMsgLenConf[255]; 
+			
+				//printf("stUserCommandConfig.i8MessageLen: %d \n", stUserCommandConfig.i8MessageLen);
+				strcpy(cMsgAfterOffset, (strToRecv+stUserCommandConfig.i8Offset));
+
+				if(!boPrint)
+				{
+					//printf("cMsgAfterOffset = strToRecv[i8Offset]: %s \n", cMsgAfterOffset); 
+					// printf("%d \n", (stUserCommandConfig.i8MessageLen+1));
+					//boPrint = true; 
+				}
+
+				strncpy(cMsgLenConf, cMsgAfterOffset, (stUserCommandConfig.i8MessageLen)); 
+				cMsgLenConf[stUserCommandConfig.i8MessageLen] = '\0';
+				if(!boPrint)
+				{
+					// printf("cMsgLenConf: %s huehuehue \n", cMsgLenConf); 
+					// printf("size of cMsgLenConf: %s \n", cMsgLenConf); 
+					//boPrint = true; 
+				}
 				
-					//printf("stUserCommandConfig.i8MessageLen: %d \n", stUserCommandConfig.i8MessageLen);
-					strcpy(cMsgAfterOffset, (strToRecv+stUserCommandConfig.i8Offset));
+				// convert cMsgLenConf from ascii to decimal 
+				uint16_t u16MsgLenExpected =  0;
+				u16MsgLenExpected =(uint16_t) asciiToDecimal(cMsgLenConf) + stUserCommandConfig.i8MessageLen; // for now we assume that the length config in the data send 
+																					 						  // is pure data length, means it dun include length of the lenght config 
+				if(!boPrint)
+				{				
+					// printf("size of u16MsgLenExpected: %d \n", u16MsgLenExpected); 
+				}
 
-					// if(!boPrint)
-					// {
-					// 	printf("cMsgAfterOffset = strToRecv[i8Offset]: %s \n", cMsgAfterOffset); 
-					// 	//boPrint = true; 
+				//printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
+				//u16MsgLenExpected = u16MsgLenExpected + (uint16_t)stUserCommandConfig.i8MessageLen + (uint16_t)stUserCommandConfig.i8Offset; 
+
+				if(!boPrint)
+				{
+					// printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
+					//printf("numBytesRecv: %d \n", numBytesRecv); 
+
+					//boPrint = true; 
+				}
+				
+				// check whether the recv length matches the expected length 
+
+				// while(1)
+				// {
+					while(totalBytesRecv < u16MsgLenExpected)
+					{
+						numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
+						printf("u16Msg expected %d \n", u16MsgLenExpected); 
+						printf("u16MsgLenRead: %d \n", totalBytesRecv); 
+
+						totalBytesRecv += numBytesRecv; 
+						if(!boPrint)
+						{
+							printf("retry recv function \n"); 
+							//boPrint = true; 
+						}
 					// }
 
-					strncpy(cMsgLenConf, cMsgAfterOffset, stUserCommandConfig.i8MessageLen);
-					cMsgLenConf[stUserCommandConfig.i8MessageLen] = '\0';
 					if(!boPrint)
 					{
-						printf("cMsgLenConf: %s huehuehue \n", cMsgLenConf); 
-						//boPrint = true; 
-					}
-					
-					// convert cMsgLenConf from ascii to decimal 
-					uint16_t u16MsgLenExpected =  0;
-					u16MsgLenExpected =(uint16_t) asciiToDecimal(cMsgLenConf); // for now we assume that the length config in the data send 
-					                       											  // is pure data length, means it dun include length of the lenght config 
-					
-					//printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
-					//u16MsgLenExpected = u16MsgLenExpected + (uint16_t)stUserCommandConfig.i8MessageLen + (uint16_t)stUserCommandConfig.i8Offset; 
-
-					if(!boPrint)
-					{
-						printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
-						printf("numBytesRecv: %d \n", numBytesRecv); 
+						printf("final numBytesRecv: %d \n", totalBytesRecv); 
+						printf("success!\n");
 						boPrint = true; 
 					}
-					
-					// check whether the recv length matches the expected length 
-					if(numBytesRecv == u16MsgLenExpected)
-					{
-						// write to the pipe 
-						write(i8PipeArr[u16NumclientConn][1], strToRecv, strlen(strToRecv)+1 ); 
-						printf("success! \n");
-					}
 
-					else
-					{
-						// read again 
-						numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, MSG_PEEK); 
-						//printf("retry recv function \n"); 
-					}
-				}
-				close(new_fd);
-				exit(0);
-			}
-
-			else // parent process 
-			{
-				// close the writing pipe 
-				close(i8PipeArr[u16NumclientConn][1]);
-
-				// increment the number of clients 
-				u16NumclientConn++;
-
-			}
-		}
-
-		//else if the listener socket is not ready 
-
-
-
-		// read from the pipe 
-		for (int i = 0; i < u16NumclientConn; i++)
-		{
-			if(FD_ISSET(i8PipeArr[i][0], &readfds))
-			{
-				int bytesRead = read(i8PipeArr[i][0], strToRecv, sizeof(strToRecv)); 
-				if(bytesRead > 0)
-				{
-					buffer[bytesRead] = '\0';
-					//printf("server: received \n%s\n", strToRecv);
-					//send(i8ClientSockets[i], strToRecv, strlen(strToRecv), 0 );  // send confimation message to the client 
-
-					if( stUserCommandConfig.i8ReplyToWhichClient == DEF_CONF_REPLY_SENDER)
-					{
-						//send(i8ClientSockets[i], strToRecv, strlen(strToRecv), 0 );  
-						//printf("u16NumclientConn %d \n", u16NumclientConn);
-					}
-
-					else if (stUserCommandConfig.i8ReplyToWhichClient == 2) // send to latest connection
-					{
-						//send(i8ClientSockets[u16NumclientConn-1], strToRecv, strlen(strToRecv), 0 ); // this is the current client (reason is this value holds the latest connection)
-						//printf("potato \n");
-					}
-
-					else if( (stUserCommandConfig.i8ReplyToWhichClient == 0)) // send to first available client 
-					{
-						//printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
-						//send(i8ClientSockets[0], strToRecv, strlen(strToRecv), 0 ); 
-					}
-
-				}
-				else 
-				{
-					
-                    printf("Client %d disconnected. Cleaning up...\n", i);
-					close(i8PipeArr[i][0]);
-					close(i8ClientSockets[i]); 
-					
-					// shifts array 
-                    for (int j = i; j < u16NumclientConn - 1; j++) {
-                        i8ClientSockets[j] = i8ClientSockets[j + 1];
-                        i8PipeArr[j][0] = i8PipeArr[j + 1][0];
-                    }
-                    u16NumclientConn--;
-
-					// Clear last slot to avoid stale FD
-					i8ClientSockets[u16NumclientConn] = -1;
-					i8PipeArr[u16NumclientConn][0] = -1;
-
-
-					// printf("i8ClientSockets[u16NumclientConn] is %d \n", i8ClientSockets[u16NumclientConn]);
-					// printf("i8PipeArr[u16NumclientConn][0] is %d \n", i8PipeArr[u16NumclientConn][0]);
-				
-					i--; // Adjust index after removal
+					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv);
 				}
 			}
 		}
