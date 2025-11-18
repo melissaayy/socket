@@ -10,14 +10,14 @@
 
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
-
-int i8ClientSockets[255] = {0}; 
+#define MAX_CLIENT_CONN 255
+int i8ClientSockets[MAX_CLIENT_CONN] = {}; 
 uint16_t u16NumclientConn = 0; 
 
 struct stUserCommand
 {
-	uint16_t i8MessageLen;
-	uint16_t i8Offset;
+	uint16_t u16MessageLen;
+	uint16_t u16Offset;
 	const char * cpPortNum;
 	int i8MsgFormat; 
 	int i8ReplyToWhichClient;
@@ -54,12 +54,12 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 	struct stUserCommand stProcessedUserCommand; 
 	char *strPortSlice; 
 	// cli param 1: size of message length 
-	stProcessedUserCommand.i8MessageLen = (uint16_t) asciiToDecimal(argv[1] + 1);
-	//printf("stProcessedUserCommand.i8MessageLen: %d \n", stProcessedUserCommand.i8MessageLen);
+	stProcessedUserCommand.u16MessageLen = (uint16_t) asciiToDecimal(argv[1] + 1);
+	//printf("stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
 
 	// cli param 2: offset
-	stProcessedUserCommand.i8Offset = (uint16_t) asciiToDecimal(argv[2] + 1); 
-	//printf("stProcessedUserCommand.i8Offset: %d \n", stProcessedUserCommand.i8Offset);
+	stProcessedUserCommand.u16Offset = (uint16_t) asciiToDecimal(argv[2] + 1); 
+	//printf("stProcessedUserCommand.u16Offset: %d \n", stProcessedUserCommand.u16Offset);
 
 	// cli param 3: port number 
 		// strPortSlice = (char *)(argv[3]+1);  		// this is for receiving more than one port number, need more handling, thinking of using an enum 
@@ -102,8 +102,9 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend)
 
 	if(u8ClientConf == DEF_CONF_REPLY_SENDER)
 	{
-		u16BytesSent = send(i8ClientSockets[u16NumclientConn], finalToSend, strlen(finalToSend), 0 );  
-		//printf("u16NumclientConn %d \n", u16NumclientConn);
+		u16BytesSent = send(i8ClientSockets[u16NumclientConn-1], finalToSend, strlen(finalToSend), 0 );  
+		printf("u16NumclientConn %d \n", u16NumclientConn);
+		printf("yayayaa %s \n", finalToSend); 
 	}
 
 	else if (u8ClientConf == 2) // send to latest connection
@@ -174,7 +175,7 @@ int main(int argc, char const* argv[])
 	fd_set readfds; // select can monitor 3 sets of descriptors 
 	int max_fd; 
 
-	char buffer[stUserCommandConfig.i8MessageLen];
+	char buffer[stUserCommandConfig.u16MessageLen];
 
 	memset(&hints,0, sizeof(hints)); 
 	hints.ai_family = AF_UNSPEC; 
@@ -225,142 +226,120 @@ int main(int argc, char const* argv[])
 		exit(1); 
 	}
 
-	while(1) // main loop
+	while (1)
 	{
-		// setting up the select() function which will help us determine which client has sent data to the server 
-		FD_ZERO(&readfds);         // clears the readfds set, a set is used by select() to keep track of file descriptors 
-		FD_SET(sockfd, &readfds);  // adding the sockfd file descriptor to the sockfd set, this is adding the listening socket 
-		max_fd = sockfd; 
+		FD_ZERO(&readfds);
+		FD_SET(sockfd, &readfds);
+		max_fd = sockfd;
 
-		// then we run select (waiting for activity)
-		int activity = select(max_fd + 1, &readfds, NULL, NULL, NULL);
-
-		if (activity < 0) 
-		{
-			perror("Err: select");
-            continue;
+		// Add all active client sockets to the fd set
+		for (int i = 0; i < MAX_CLIENT_CONN; i++) {
+			int temp_fd = i8ClientSockets[i];
+			if (temp_fd > 0) {
+				FD_SET(temp_fd, &readfds);
+				if (temp_fd > max_fd) max_fd = temp_fd;
+			}
 		}
 
-		// then check which FDs are ready 
-		// if server's FD is ready then can be ready to accept client connection 
-		if (FD_ISSET(sockfd, &readfds))
-		{
-			sin_size = sizeof(their_addr); 
-			new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size); // accept() is blocking, means that if no conn req, 
-																					// the below codes will not cont execution 
-			if (new_fd == -1) 
-			{
-				perror("Err: accept"); 
-				continue; 
+		// Wait for activity
+		int activity = select(max_fd + 1, &readfds, NULL, NULL, NULL);
+		if (activity < 0) {
+			perror("Err: select");
+			continue;
+		}
+
+		// Accept new client
+		if (FD_ISSET(sockfd, &readfds)) {
+			sin_size = sizeof(their_addr);
+			new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+			if (new_fd == -1) {
+				perror("Err: accept");
+				continue;
 			}
 
-			// increment the number of clients 
-			u16NumclientConn++;
+			if (u16NumclientConn < MAX_CLIENT_CONN) {
+				i8ClientSockets[u16NumclientConn++] = new_fd;
+			} else {
+				printf("Max clients reached\n");
+				close(new_fd);
+			}
 
-			i8ClientSockets[u16NumclientConn] = new_fd;
+			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
+			printf("server: got connection from %s\n", s);
+		}
 
-			inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s); 
-			printf("server: got connection from %s\n", s); 
-			printf("server: you are client number %d\n", u16NumclientConn); 
-
-			// process data recv from client 
-			while(1) 
+		// Handle data from clients
+		for (int i = 0; i < MAX_CLIENT_CONN; i++) 
+		{
+			int client_fd = i8ClientSockets[i];
+			if (client_fd > 0 && FD_ISSET(client_fd, &readfds)) 
 			{
-				numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, MSG_PEEK); 
 
-				if (numBytesRecv == -1)
-				{
-					perror("Err: recv error \n"); 
-					close(new_fd); 
-					continue;
-				}
-
-				if(numBytesRecv == 0)
-				{
-					printf("client has disconnected \n"); 
-					break; 
-				}
-
-				strToRecv[numBytesRecv] = '\0'; // Null-terminate received string
-				// printf("server: received \n%s\n", strToRecv);
-				if(!boPrint)
-				{
-					//printf("server: received \n%s\n", strToRecv);
-					//boPrint = true; 
-				}
-
-
-				// process the data based on the L and O from CLI
-				// to know where is the length information, we would need to use the offset 
-				char cMsgAfterOffset[255];
-				char cMsgLenConf[255]; 
-			
-				//printf("stUserCommandConfig.i8MessageLen: %d \n", stUserCommandConfig.i8MessageLen);
-				strcpy(cMsgAfterOffset, (strToRecv+stUserCommandConfig.i8Offset));
-
-				if(!boPrint)
-				{
-					//printf("cMsgAfterOffset = strToRecv[i8Offset]: %s \n", cMsgAfterOffset); 
-					// printf("%d \n", (stUserCommandConfig.i8MessageLen+1));
-					//boPrint = true; 
-				}
-
-				strncpy(cMsgLenConf, cMsgAfterOffset, (stUserCommandConfig.i8MessageLen)); 
-				cMsgLenConf[stUserCommandConfig.i8MessageLen] = '\0';
-				if(!boPrint)
-				{
-					// printf("cMsgLenConf: %s huehuehue \n", cMsgLenConf); 
-					// printf("size of cMsgLenConf: %s \n", cMsgLenConf); 
-					//boPrint = true; 
-				}
+				// need to know how much data to peek, also we need to cyclically read data until we 
+				// get the length we want, else if we only read once, we are assuming we get the data until
+				// the byte containing the offset and the length data (length may not be in the first few bytes of data sent)
 				
-				// convert cMsgLenConf from ascii to decimal 
-				uint16_t u16MsgLenExpected =  0;
-				u16MsgLenExpected =(uint16_t) asciiToDecimal(cMsgLenConf) + stUserCommandConfig.i8MessageLen; // for now we assume that the length config in the data send 
-																					 						  // is pure data length, means it dun include length of the lenght config 
-				if(!boPrint)
-				{				
-					// printf("size of u16MsgLenExpected: %d \n", u16MsgLenExpected); 
-				}
-
-				//printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
-				//u16MsgLenExpected = u16MsgLenExpected + (uint16_t)stUserCommandConfig.i8MessageLen + (uint16_t)stUserCommandConfig.i8Offset; 
-
-				if(!boPrint)
+				// to know how to much bytes we need to read 
+				uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
+				while (1)
 				{
-					// printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
-					//printf("numBytesRecv: %d \n", numBytesRecv); 
-
-					//boPrint = true; 
-				}
-				
-				// check whether the recv length matches the expected length 
-
-				// while(1)
-				// {
-					while(totalBytesRecv < u16MsgLenExpected)
+					numBytesRecv = recv(client_fd, strToRecv, sizeof(strToRecv) - 1, MSG_PEEK);
+					if (numBytesRecv < u16ExNumBytesHeader)
 					{
-						numBytesRecv = recv(new_fd, strToRecv, sizeof(strToRecv)-1, 0); 
-						printf("u16Msg expected %d \n", u16MsgLenExpected); 
-						printf("u16MsgLenRead: %d \n", totalBytesRecv); 
-
-						totalBytesRecv += numBytesRecv; 
-						if(!boPrint)
-						{
-							printf("retry recv function \n"); 
-							//boPrint = true; 
-						}
-					// }
-
-					if(!boPrint)
-					{
-						printf("final numBytesRecv: %d \n", totalBytesRecv); 
-						printf("success!\n");
-						boPrint = true; 
+						continue; // we have recvd the more than the header data we need 
 					}
 
-					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv);
+					if (numBytesRecv == -1) 
+					{
+						perror("Err: recv error");
+						close(client_fd);
+						i8ClientSockets[i] = 0;
+						break;
+					}
+					if (numBytesRecv == 0) {
+						printf("Client disconnected\n");
+						close(client_fd);
+						i8ClientSockets[i] = 0;
+						break;
+					}
+
+					// if not enough bytes are recvd, then we will break loop and re-enter when more bytes recvd are
+					// detected by select() function 
+					break; 
 				}
+				
+
+				strToRecv[numBytesRecv] = '\0';
+				//printf("Peeked: %s\n", strToRecv);
+
+				// Extract expected length
+				char cMsgAfterOffset[255], cMsgLenConf[255];
+				strcpy(cMsgAfterOffset, strToRecv + stUserCommandConfig.u16Offset);
+				strncpy(cMsgLenConf, cMsgAfterOffset, stUserCommandConfig.u16MessageLen);
+				cMsgLenConf[stUserCommandConfig.u16MessageLen] = '\0';
+				uint16_t u16MsgLenExpected = asciiToDecimal(cMsgLenConf) + stUserCommandConfig.u16MessageLen;
+
+				// Read full data sent 
+				uint16_t u16DataByteRecvd = 0;
+				while (u16DataByteRecvd < u16MsgLenExpected) {
+					int recvd = recv(client_fd, strToRecv + u16DataByteRecvd, u16MsgLenExpected - u16DataByteRecvd, 0);
+					if (recvd <= 0)
+					{
+						break;
+					}
+					u16DataByteRecvd += recvd;
+				}
+
+				if(u16DataByteRecvd < 0)
+				{
+					printf("Err: data recv error \n");
+				}
+
+				strToRecv[u16DataByteRecvd] = '\0';
+				printf("Full message: %s\n", strToRecv);
+
+				// Send response
+				processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv);
 			}
 		}
 	}
