@@ -161,8 +161,8 @@ int main(int argc, char const* argv[])
 	// handle socket connection
 	struct addrinfo hints, *res, *p; 
 	int sockfd, new_fd; 
-	socklen_t sin_size; 
 	struct sockaddr_storage their_addr; 
+	socklen_t sin_size = sizeof(their_addr); 
 	char s[INET6_ADDRSTRLEN];
 	char* strToSend = "Hello from server! banana \n";
 	char strToRecv[30000]; 
@@ -357,9 +357,9 @@ int main(int argc, char const* argv[])
 							break;
 						}
 						u16DataByteRecvd += recvd;
-						printf("recvd: %d \n", recvd); 
-						printf("u16DataByteRecvd: %d \n", u16DataByteRecvd); 
-						printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
+						// printf("recvd: %d \n", recvd); 
+						// printf("u16DataByteRecvd: %d \n", u16DataByteRecvd); 
+						// printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
 						//printf("im inside the bytes extraction loop \n");
 					}
 
@@ -368,9 +368,21 @@ int main(int argc, char const* argv[])
 						printf("Err: data recv error \n");
 					}
 
+					else if (u16DataByteRecvd == 0)
+					{
+						printf("client disconnected \n");
+					}
+
+					else
+					{
+						// printf("extracted the data based on the length and the offset ooo \n");
+						strToRecv[u16DataByteRecvd] = '\0';
+						printf("Full message: %s\n", strToRecv);
+					}
+
 					// printf("extracted the data based on the length and the offset ooo \n");
-					strToRecv[u16DataByteRecvd] = '\0';
-					printf("Full message: %s\n", strToRecv);
+					// strToRecv[u16DataByteRecvd] = '\0';
+					// printf("Full message: %s\n", strToRecv);
 
 					// Send response
 					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i);
