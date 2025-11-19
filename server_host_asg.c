@@ -166,7 +166,6 @@ int main(int argc, char const* argv[])
 	char s[INET6_ADDRSTRLEN];
 	char* strToSend = "Hello from server! banana \n";
 	char* strToSendBack; 
-	uint16_t numBytesRecv; 
 	uint16_t totalBytesRecv; 
 	pid_t tForkPid, proccessPidArr[100];
 
@@ -315,11 +314,42 @@ int main(int argc, char const* argv[])
 					// printf("ok recv data from client \n"); 
 					char strToPeek[stUserCommandConfig.u16Offset+1000]; // making sure our peek buffer is bigger than the offset length
 
+					uint16_t numBytesPeeked = 0; 
+
 					// we will recv the information from the client 
-					numBytesRecv = recv(i, strToPeek, sizeof(strToPeek), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
+					//umBytesPeeked = recv(i, strToPeek, sizeof(strToPeek), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
 																					// 		 this means that the data do not contain any length information 
 					
-					if(numBytesRecv == -1) // error occured 
+					printf("right outside while loop \n"); 
+					printf("stUserCommandConfig.u16Offset: %d \n", stUserCommandConfig.u16Offset);
+
+					uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
+
+					while (numBytesPeeked < u16ExNumBytesHeader) 
+					{
+						printf("right inside while loop \n"); 
+
+						select(i+1, &readfds, NULL, NULL, NULL); 
+
+						printf("right inside while loop, after select \n"); 
+
+						// consume the data in the OS buffer 
+						int recvdPeek = recv(i, strToPeek + numBytesPeeked, u16ExNumBytesHeader - numBytesPeeked, MSG_PEEK);
+						numBytesPeeked += recvdPeek;
+						// printf("recvdPeek: %d \n", recvdPeek); 
+						// printf("numBytesPeeked: %d \n", numBytesPeeked); 
+						// printf("u16ExNumBytesHeader %d \n", u16ExNumBytesHeader); 
+
+						if (recvdPeek <= 0)
+						{
+							printf("hrmmm \n");
+							break;
+						}
+
+						printf("im inside the bytes extraction loop \n");
+					}
+
+					if(numBytesPeeked == -1) // error occured 
 					{
 						perror("Err: recv error and will close this client's connection \n");
 						close(i); 
@@ -328,7 +358,7 @@ int main(int argc, char const* argv[])
 						//i8ClientSockets[i] = -1;  // clear the client socket's connection information in the buffer 
 					}
 
-					if (numBytesRecv == 0) // connection closed by client 
+					if (numBytesPeeked == 0) // connection closed by client 
 					{
 						printf("Client disconnected, will proceed to close the fd for this client \n"); 
 						close(i); 
@@ -346,7 +376,6 @@ int main(int argc, char const* argv[])
 					cMsgLenConf[stUserCommandConfig.u16MessageLen] = '\0';
 					uint16_t u16MsgLenExpected = asciiToDecimal(cMsgLenConf) + stUserCommandConfig.u16MessageLen;
 
-					uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
 					char strToRecv[u16MsgLenExpected+1000]; // making sure the buffer size is bigger than our data size 
 
 					// Read full data sent 
