@@ -165,7 +165,6 @@ int main(int argc, char const* argv[])
 	socklen_t sin_size = sizeof(their_addr); 
 	char s[INET6_ADDRSTRLEN];
 	char* strToSend = "Hello from server! banana \n";
-	char strToRecv[30000]; 
 	char* strToSendBack; 
 	uint16_t numBytesRecv; 
 	uint16_t totalBytesRecv; 
@@ -314,9 +313,10 @@ int main(int argc, char const* argv[])
 				else
 				{
 					// printf("ok recv data from client \n"); 
+					char strToPeek[stUserCommandConfig.u16Offset+1000]; // making sure our peek buffer is bigger than the offset length
 
 					// we will recv the information from the client 
-					numBytesRecv = recv(i, strToRecv, sizeof(strToRecv), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
+					numBytesRecv = recv(i, strToPeek, sizeof(strToPeek), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
 																					// 		 this means that the data do not contain any length information 
 					
 					if(numBytesRecv == -1) // error occured 
@@ -341,12 +341,13 @@ int main(int argc, char const* argv[])
 
 					// processing the number of bytes to read 
 					char cMsgAfterOffset[255], cMsgLenConf[255];
-					strcpy(cMsgAfterOffset, strToRecv + stUserCommandConfig.u16Offset);
+					strcpy(cMsgAfterOffset, strToPeek + stUserCommandConfig.u16Offset);
 					strncpy(cMsgLenConf, cMsgAfterOffset, stUserCommandConfig.u16MessageLen);
 					cMsgLenConf[stUserCommandConfig.u16MessageLen] = '\0';
 					uint16_t u16MsgLenExpected = asciiToDecimal(cMsgLenConf) + stUserCommandConfig.u16MessageLen;
 
 					uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
+					char strToRecv[u16MsgLenExpected+1000]; // making sure the buffer size is bigger than our data size 
 
 					// Read full data sent 
 					uint16_t u16DataByteRecvd = 0;
@@ -354,6 +355,7 @@ int main(int argc, char const* argv[])
 					{
 						select(i+1, &readfds, NULL, NULL, NULL); 
 
+						// consume the data in the OS buffer 
 						int recvd = recv(i, strToRecv + u16DataByteRecvd, u16MsgLenExpected - u16DataByteRecvd, 0);
 						if (recvd <= 0)
 						{
