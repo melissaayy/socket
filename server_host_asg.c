@@ -115,8 +115,8 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 
 	else if( (u8ClientConf == 0)) // send to first available client 
 	{
-		//u16BytesSent = printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
-		//send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 ); 
+		u16BytesSent = send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 );
+		//printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
 	}
 
 	if(u16BytesSent == -1)
@@ -316,7 +316,8 @@ int main(int argc, char const* argv[])
 					// printf("ok recv data from client \n"); 
 
 					// we will recv the information from the client 
-					numBytesRecv = recv(i, strToRecv, sizeof(strToRecv), MSG_PEEK); 
+					numBytesRecv = recv(i, strToRecv, sizeof(strToRecv), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
+																					// 		 this means that the data do not contain any length information 
 					
 					if(numBytesRecv == -1) // error occured 
 					{
@@ -324,6 +325,7 @@ int main(int argc, char const* argv[])
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
+						//i8ClientSockets[i] = -1;  // clear the client socket's connection information in the buffer 
 					}
 
 					if (numBytesRecv == 0) // connection closed by client 
@@ -332,6 +334,7 @@ int main(int argc, char const* argv[])
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
+						//i8ClientSockets[i] = -1; 
 					}
 
 					// printf("recv and no error for now \n");
@@ -363,6 +366,8 @@ int main(int argc, char const* argv[])
 						//printf("im inside the bytes extraction loop \n");
 					}
 
+					//strToRecv[u16MsgLenExpected] = '\0'; // null terminate the string 
+
 					if(u16DataByteRecvd < 0)
 					{
 						printf("Err: data recv error \n");
@@ -373,7 +378,7 @@ int main(int argc, char const* argv[])
 						printf("client disconnected \n");
 					}
 
-					else
+					else if (u16DataByteRecvd >= u16MsgLenExpected)
 					{
 						// printf("extracted the data based on the length and the offset ooo \n");
 						strToRecv[u16DataByteRecvd] = '\0';
