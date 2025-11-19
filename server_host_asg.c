@@ -95,28 +95,49 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 }
 
 
-bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd)
+bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend)
 {
 	uint16_t u16BytesSent = 0; 
+	uint16_t u16TtlBytesSent = 0; 
 	bool boSendClientResult = false; 
 
 	if(u8ClientConf == DEF_CONF_REPLY_SENDER)
 	{
-		u16BytesSent = send(client_fd, finalToSend, strlen(finalToSend), 0 );  
+		client_fd = client_fd; 
 		// printf("u16NumclientConn %d \n", u16NumclientConn);
 		// printf("yayayaa %s \n", finalToSend); 
 	}
 
 	else if (u8ClientConf == 2) // send to latest connection
 	{
-		u16BytesSent = send(i8ClientSockets[u16NumclientConn-1], finalToSend, strlen(finalToSend), 0 ); // this is the current client (reason is this value holds the latest connection)
+		client_fd = i8ClientSockets[u16NumclientConn-1];
+		//u16BytesSent = send(i8ClientSockets[u16NumclientConn-1], finalToSend, strlen(finalToSend), 0 ); // this is the current client (reason is this value holds the latest connection)
 		//printf("potato \n");
 	}
 
 	else if( (u8ClientConf == 0)) // send to first available client 
 	{
-		u16BytesSent = send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 );
+		client_fd = i8ClientSockets[0];
+		//u16BytesSent = send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 );
 		//printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
+	}
+
+	// cyclically send until the expected number to send is reached 
+	while (u16TtlBytesSent < u16ExLentoSend)
+	{
+		u16BytesSent = send(client_fd, finalToSend, strlen(finalToSend), 0 );  
+		if(u16BytesSent == -1)
+		{
+			perror("data sent to client failed");
+			boSendClientResult = false; 
+			break; 
+		}
+
+		u16TtlBytesSent += u16BytesSent; 
+		// printf("u16BytesSent %d \n", u16BytesSent); 
+		// printf("u16TtlBytesSent %d \n", u16TtlBytesSent); 
+		// printf("u16ExLentoSend %d \n", u16ExLentoSend); 
+
 	}
 
 	if(u16BytesSent == -1)
@@ -295,7 +316,7 @@ int main(int argc, char const* argv[])
 					{
 						i8ClientSockets[u16NumclientConn] = new_fd; 
 						u16NumclientConn++; // increment our client number count 
-						printf("ok i hv accepted and has set the client fd to the set \n"); 
+						// printf("ok i hv accepted and has set the client fd to the set \n"); 
 					}
 
 					else
@@ -320,18 +341,17 @@ int main(int argc, char const* argv[])
 					//umBytesPeeked = recv(i, strToPeek, sizeof(strToPeek), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
 																					// 		 this means that the data do not contain any length information 
 					
-					printf("right outside while loop \n"); 
-					printf("stUserCommandConfig.u16Offset: %d \n", stUserCommandConfig.u16Offset);
+					// printf("right outside while loop \n"); 
+					// printf("stUserCommandConfig.u16Offset: %d \n", stUserCommandConfig.u16Offset);
 
 					uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
 
 					while (numBytesPeeked < u16ExNumBytesHeader) 
 					{
-						printf("right inside while loop \n"); 
+						// printf("right inside while loop \n"); 
 
-						select(i+1, &readfds, NULL, NULL, NULL); 
-
-						printf("right inside while loop, after select \n"); 
+						//select(i+1, &readfds, NULL, NULL, NULL); 
+						// printf("right inside while loop, after select \n"); 
 
 						// consume the data in the OS buffer 
 						int recvdPeek = recv(i, strToPeek + numBytesPeeked, u16ExNumBytesHeader - numBytesPeeked, MSG_PEEK);
@@ -346,7 +366,7 @@ int main(int argc, char const* argv[])
 							break;
 						}
 
-						printf("im inside the bytes extraction loop \n");
+						// printf("im inside the bytes extraction loop \n");
 					}
 
 					if(numBytesPeeked == -1) // error occured 
@@ -382,7 +402,7 @@ int main(int argc, char const* argv[])
 					uint16_t u16DataByteRecvd = 0;
 					while (u16DataByteRecvd < u16MsgLenExpected) 
 					{
-						select(i+1, &readfds, NULL, NULL, NULL); 
+						//select(i+1, &readfds, NULL, NULL, NULL); 
 
 						// consume the data in the OS buffer 
 						int recvd = recv(i, strToRecv + u16DataByteRecvd, u16MsgLenExpected - u16DataByteRecvd, 0);
@@ -421,7 +441,7 @@ int main(int argc, char const* argv[])
 					// printf("Full message: %s\n", strToRecv);
 
 					// Send response
-					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i);
+					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected);
 
 				}
 			}
