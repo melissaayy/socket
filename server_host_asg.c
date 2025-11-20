@@ -11,8 +11,11 @@
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
 #define MAX_CLIENT_CONN 255
+#define MAX_FILE_LOG 9999
+
 int i8ClientSockets[MAX_CLIENT_CONN] = {}; 
 uint16_t u16NumclientConn = 0; 
+// fd_set masterfds; 
 
 struct stUserCommand
 {
@@ -89,13 +92,13 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 	{
 		stProcessedUserCommand.i8ReplyToWhichClient = DEF_CONF_REPLY_SENDER; 
 	}
-	printf("stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
+	//printf("stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
 
 	return stProcessedUserCommand; 
 }
 
 
-bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend)
+bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend, int max_fd)
 {
 	uint16_t u16BytesSent = 0; 
 	uint16_t u16TtlBytesSent = 0; 
@@ -111,6 +114,18 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 	else if (u8ClientConf == 2) // send to latest connection
 	{
 		client_fd = i8ClientSockets[u16NumclientConn-1];
+		// if (client_fd == -1)
+		// {					
+		// 	for (uint16_t j = u16NumclientConn -1 ; j >= 0; j--) 
+		// 	{
+		// 		if (i8ClientSockets[j] != -1) 
+		// 		{
+		// 			client_fd = i8ClientSockets[j];
+		// 		}
+		// 	}
+
+		// }
+		// client_fd = max_fd; 
 		//u16BytesSent = send(i8ClientSockets[u16NumclientConn-1], finalToSend, strlen(finalToSend), 0 ); // this is the current client (reason is this value holds the latest connection)
 		//printf("potato \n");
 	}
@@ -118,6 +133,7 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 	else if( (u8ClientConf == 0)) // send to first available client 
 	{
 		client_fd = i8ClientSockets[0];
+		// client_fd = masterfds[1];
 		//u16BytesSent = send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 );
 		//printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
 	}
@@ -190,33 +206,38 @@ int main(int argc, char const* argv[])
 	uint16_t totalBytesRecv; 
 	pid_t tForkPid, proccessPidArr[100];
 
-
-	fd_set readfds, masterfds; // select can monitor 3 sets of descriptors 
+	fd_set readfds, masterfds; 
 	int max_fd; 
 
 	char buffer[stUserCommandConfig.u16MessageLen];
+
+	int fileNum = 1; 
 
 	memset(&hints,0, sizeof(hints)); 
 	hints.ai_family = AF_UNSPEC; 
 	hints.ai_socktype =  SOCK_STREAM; 
 	hints.ai_flags = AI_PASSIVE; // use my IP
 
-	if(getaddrinfo(NULL, stUserCommandConfig.cpPortNum , &hints, &res) == -1) // this line is giving segentation fault 
+	if(getaddrinfo(NULL, stUserCommandConfig.cpPortNum , &hints, &res) == -1)  
 	{
 		perror("Err: get address info error \n"); 
 	} 
 
 	for (p = res; p != NULL; p = p-> ai_next) 
 	{
-		sockfd = socket(p -> ai_family, p -> ai_socktype , p -> ai_protocol);
+		sockfd = socket(p -> ai_family, p -> ai_socktype , p -> ai_protocol); // ai_protocol is 0 bcuz we used AF_UNSPEC means can either be IPv4 or IPv6 and we will let it decide by itself 
 		if(sockfd == -1)
 		{ 
 			perror("Err: get sock fd error \n"); 
 			continue; 
 		}
 		
+		// this is used to enable us to reuse the port while the system is still waiting for the port after a connection is closed 
+		// TCP sockets go through a TIME_WAIT state after closing.
+		// This is part of TCP’s design to ensure all packets in flight are properly handled and avoid confusion with new connections.
+		// During TIME_WAIT, the port is not fully reusable unless you set special options.
 		int yes = 1;
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) { // check whether this is really needed 
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {  
 			perror("setsockopt");
 			exit(1);
 		}
@@ -262,8 +283,8 @@ int main(int argc, char const* argv[])
 
 		// run select function, this function will monitor several sockets at the same time 
 		// then it will tell us which of the sockets are ready for reading/ writing/ have exceptions 
-		int activity = select(max_fd+1, &readfds, NULL, NULL, NULL); // the last 3 parameter is false as we dont monitor for write, expection
-																// and dont want to set any timeout, now is wait infinitely 
+		int activity = select(max_fd+1, &readfds, NULL, NULL, NULL); // the last 3 parameter is false as we dont monitor for write, exception
+																     // and dont want to set any timeout, now is wait infinitely 
 		
 		// printf("new activity detected: %d \n", activity);
 
@@ -375,7 +396,7 @@ int main(int argc, char const* argv[])
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
-						//i8ClientSockets[i] = -1;  // clear the client socket's connection information in the buffer 
+						i8ClientSockets[i-1] = -1;  // clear the client socket's connection information in the buffer 
 					}
 
 					if (numBytesPeeked == 0) // connection closed by client 
@@ -384,7 +405,7 @@ int main(int argc, char const* argv[])
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
-						//i8ClientSockets[i] = -1; 
+						i8ClientSockets[i-1] = -1; 
 					}
 
 					// printf("recv and no error for now \n");
@@ -426,14 +447,34 @@ int main(int argc, char const* argv[])
 
 					else if (u16DataByteRecvd == 0)
 					{
-						printf("client disconnected \n");
+						printf("client disconnected \n"); // to put into the hostsim.log 
 					}
 
 					else if (u16DataByteRecvd >= u16MsgLenExpected)
 					{
 						// printf("extracted the data based on the length and the offset ooo \n");
 						strToRecv[u16DataByteRecvd] = '\0';
-						printf("Full message: %s\n", strToRecv);
+						//printf("Full message: %s\n", strToRecv); // dump the message recv into a separate file (each msg recv is an individual file, eg: hoostsimrecv.1, limit the number of file to 9999, after that rewrite file from 1)
+
+						// save the messages into a file 
+						char fileName[100];
+						//printf("fileNum: %d \n", fileNum);
+						snprintf(fileName, sizeof(fileName), "hostsimrecv.%d", fileNum);
+
+						FILE *fpDataRecv = fopen(fileName, "w"); 
+						if(!fpDataRecv)
+						{
+							perror("fopen fail \n");
+						}
+
+						fprintf(fpDataRecv, "%s", strToRecv); 
+						fclose(fpDataRecv); 
+
+						if (fileNum >= MAX_FILE_LOG)
+						{
+							fileNum = 0; 
+						}
+						fileNum++; 
 					}
 
 					// printf("extracted the data based on the length and the offset ooo \n");
@@ -441,7 +482,7 @@ int main(int argc, char const* argv[])
 					// printf("Full message: %s\n", strToRecv);
 
 					// Send response
-					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected);
+					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd);
 
 				}
 			}
