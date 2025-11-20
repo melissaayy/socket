@@ -26,6 +26,13 @@ struct stUserCommand
 	int i8ReplyToWhichClient;
 }; 
 
+struct stCreatedSocket
+{
+	int iSocketFd;
+	//struct sockaddr_storage stClientAddr; 
+	int iListenResult;
+};
+
 /*
  * Function: Converting numbers in ASCII format to decimal
  * Input: pointer to a string 
@@ -183,6 +190,86 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 }
 
 /*
+ * Function: Setup server socket, bind and start listening 
+ * Input: CLI parameters  
+ * Output: Listening port result 
+*/ 
+struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u16MessageLen, FILE * filePtr) // struct sockaddr_storage * pClientAddr)
+{
+	struct stCreatedSocket stServerSocket; 
+
+	// handle socket connection
+	struct addrinfo hints, *res, *p; 
+	int sockfd, new_fd; 
+	//struct sockaddr_storage their_addr; 
+	//socklen_t sin_size = sizeof(stServerSock.stClientAddr); 
+	char s[INET6_ADDRSTRLEN];
+	char* strToSend = "Hello from server! banana \n";
+	char* strToSendBack; 
+	uint16_t totalBytesRecv; 
+	pid_t tForkPid, proccessPidArr[100];
+	char buffer[u16MessageLen];
+
+	memset(&hints,0, sizeof(hints)); 
+	hints.ai_family = AF_UNSPEC; 
+	hints.ai_socktype =  SOCK_STREAM; 
+	hints.ai_flags = AI_PASSIVE; // use my IP
+
+	if(getaddrinfo(NULL, cpPortNum , &hints, &res) == -1)  
+	{
+		//perror("Err: get address info error \n"); 
+		fprintf(filePtr, "Err: get address info error \n"); 
+	} 
+
+	for (p = res; p != NULL; p = p-> ai_next) 
+	{
+		sockfd = socket(p -> ai_family, p -> ai_socktype , p -> ai_protocol); // ai_protocol is 0 bcuz we used AF_UNSPEC means can either be IPv4 or IPv6 and we will let it decide by itself 
+		stServerSocket.iSocketFd = sockfd;
+		if(sockfd == -1)
+		{ 
+			//perror("Err: get sock fd error \n"); 
+			fprintf(filePtr, "Err: get sock fd error \n"); 
+			continue; 
+		}
+		
+		// this is used to enable us to reuse the port while the system is still waiting for the port after a connection is closed 
+		// TCP sockets go through a TIME_WAIT state after closing.
+		// This is part of TCP’s design to ensure all packets in flight are properly handled and avoid confusion with new connections.
+		// During TIME_WAIT, the port is not fully reusable unless you set special options.
+		int yes = 1;
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
+		{  
+			//perror("Err: setsockopt");
+			fprintf(filePtr, "Err: setsockopt \n"); 
+			exit(1);
+		}
+
+		if(bind(sockfd, p->ai_addr, p-> ai_addrlen) == -1)
+		{
+			close(sockfd); 
+			//perror("Err: sock binding\n"); 
+			fprintf(filePtr, "Err: sock binding\n"); 
+			continue;
+		}
+
+		break; 
+	}
+
+	freeaddrinfo(res); 
+
+	if (p == NULL) 
+	{
+		//perror("Err: server fail to bind \n");
+		fprintf(filePtr, "Err: server fail to bind \n"); 
+		exit(1); 
+	} 
+
+	stServerSocket.iListenResult = listen(sockfd, BACKLOG); 
+
+	return stServerSocket; 
+}
+
+/*
  * Function: Obtain IP address (IPv4 or IPv6) 
  * Input: pointer to sockaddr structure  
  * Output: IP address (IPv4 or IPv6) 
@@ -200,10 +287,10 @@ void * get_in_addr(struct sockaddr * sa)
 	} 
 } 
 
-bool boPrint = false; 
-
 int main(int argc, char const* argv[]) 
 {
+	int fileNum = 1; 
+
 	// save the messages into a file 
 	char fileNameLog[100] = "hostsimlog"; 
 	FILE *fpDataLog = fopen(fileNameLog, "w"); 
@@ -216,89 +303,94 @@ int main(int argc, char const* argv[])
 	// get command line configuration
 	struct stUserCommand stUserCommandConfig; 
 	stUserCommandConfig = stGetCommandLineInput(argv, fpDataLog); 
+	char s[INET6_ADDRSTRLEN];
 
-	// handle socket connection
-	struct addrinfo hints, *res, *p; 
-	int sockfd, new_fd; 
+	// // handle socket connection
+	// struct addrinfo hints, *res, *p; 
+	// int sockfd, new_fd; 
+	// char s[INET6_ADDRSTRLEN];
+	// char* strToSend = "Hello from server! banana \n";
+	// char* strToSendBack; 
+	// uint16_t totalBytesRecv; 
+	// pid_t tForkPid, proccessPidArr[100];
+
+	// fd_set readfds, masterfds; 
+	// int max_fd; 
+
+	// char buffer[stUserCommandConfig.u16MessageLen];
+
+	// memset(&hints,0, sizeof(hints)); 
+	// hints.ai_family = AF_UNSPEC; 
+	// hints.ai_socktype =  SOCK_STREAM; 
+	// hints.ai_flags = AI_PASSIVE; // use my IP
+
+	// if(getaddrinfo(NULL, stUserCommandConfig.cpPortNum , &hints, &res) == -1)  
+	// {
+	// 	//perror("Err: get address info error \n"); 
+	// 	fprintf(fpDataLog, "Err: get address info error \n"); 
+	// } 
+
+	// for (p = res; p != NULL; p = p-> ai_next) 
+	// {
+	// 	sockfd = socket(p -> ai_family, p -> ai_socktype , p -> ai_protocol); // ai_protocol is 0 bcuz we used AF_UNSPEC means can either be IPv4 or IPv6 and we will let it decide by itself 
+	// 	if(sockfd == -1)
+	// 	{ 
+	// 		//perror("Err: get sock fd error \n"); 
+	// 		fprintf(fpDataLog, "Err: get sock fd error \n"); 
+	// 		continue; 
+	// 	}
+		
+	// 	// this is used to enable us to reuse the port while the system is still waiting for the port after a connection is closed 
+	// 	// TCP sockets go through a TIME_WAIT state after closing.
+	// 	// This is part of TCP’s design to ensure all packets in flight are properly handled and avoid confusion with new connections.
+	// 	// During TIME_WAIT, the port is not fully reusable unless you set special options.
+	// 	int yes = 1;
+	// 	if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
+	// 	{  
+	// 		//perror("Err: setsockopt");
+	// 		fprintf(fpDataLog, "Err: setsockopt \n"); 
+	// 		exit(1);
+	// 	}
+
+	// 	if(bind(sockfd, p->ai_addr, p-> ai_addrlen) == -1)
+	// 	{
+	// 		close(sockfd); 
+	// 		//perror("Err: sock binding\n"); 
+	// 		fprintf(fpDataLog, "Err: sock binding\n"); 
+	// 		continue;
+	// 	}
+
+	// 	break; 
+	// }
+
+	// freeaddrinfo(res); 
+
+	// if (p == NULL) 
+	// {
+	// 	//perror("Err: server fail to bind \n");
+	// 	fprintf(fpDataLog, "Err: server fail to bind \n"); 
+	// 	exit(1); 
+	// } 
+
+	int new_fd; 
+	struct stCreatedSocket stServerSock = iSetupListeningSocket(stUserCommandConfig.cpPortNum, stUserCommandConfig.u16MessageLen, fpDataLog);
 	struct sockaddr_storage their_addr; 
 	socklen_t sin_size = sizeof(their_addr); 
-	char s[INET6_ADDRSTRLEN];
-	char* strToSend = "Hello from server! banana \n";
-	char* strToSendBack; 
-	uint16_t totalBytesRecv; 
-	pid_t tForkPid, proccessPidArr[100];
 
-	fd_set readfds, masterfds; 
-	int max_fd; 
-
-	char buffer[stUserCommandConfig.u16MessageLen];
-
-	int fileNum = 1; 
-
-	memset(&hints,0, sizeof(hints)); 
-	hints.ai_family = AF_UNSPEC; 
-	hints.ai_socktype =  SOCK_STREAM; 
-	hints.ai_flags = AI_PASSIVE; // use my IP
-
-	if(getaddrinfo(NULL, stUserCommandConfig.cpPortNum , &hints, &res) == -1)  
-	{
-		//perror("Err: get address info error \n"); 
-		fprintf(fpDataLog, "Err: get address info error \n"); 
-	} 
-
-	for (p = res; p != NULL; p = p-> ai_next) 
-	{
-		sockfd = socket(p -> ai_family, p -> ai_socktype , p -> ai_protocol); // ai_protocol is 0 bcuz we used AF_UNSPEC means can either be IPv4 or IPv6 and we will let it decide by itself 
-		if(sockfd == -1)
-		{ 
-			//perror("Err: get sock fd error \n"); 
-			fprintf(fpDataLog, "Err: get sock fd error \n"); 
-			continue; 
-		}
-		
-		// this is used to enable us to reuse the port while the system is still waiting for the port after a connection is closed 
-		// TCP sockets go through a TIME_WAIT state after closing.
-		// This is part of TCP’s design to ensure all packets in flight are properly handled and avoid confusion with new connections.
-		// During TIME_WAIT, the port is not fully reusable unless you set special options.
-		int yes = 1;
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
-		{  
-			//perror("Err: setsockopt");
-			fprintf(fpDataLog, "Err: setsockopt \n"); 
-			exit(1);
-		}
-
-		if(bind(sockfd, p->ai_addr, p-> ai_addrlen) == -1)
-		{
-			close(sockfd); 
-			//perror("Err: sock binding\n"); 
-			fprintf(fpDataLog, "Err: sock binding\n"); 
-			continue;
-		}
-
-		break; 
-	}
-
-	freeaddrinfo(res); 
-
-	if (p == NULL) 
-	{
-		//perror("Err: server fail to bind \n");
-		fprintf(fpDataLog, "Err: server fail to bind \n"); 
-		exit(1); 
-	} 
-
-	if(listen(sockfd, BACKLOG) == -1)
+	if(stServerSock.iListenResult == -1)
 	{
 		//perror("Err: listen \n"); 
 		fprintf(fpDataLog, "Err: listen \n"); 
 		exit(1); 
 	}
 
+	fd_set readfds, masterfds; 
+	int max_fd; 
+
 	FD_ZERO(&readfds); // master fd set 
 	FD_ZERO(&masterfds); // backup fd set, we need this cus the select() func will change the master fd set
-	FD_SET(sockfd, &masterfds); // we are setting the first element of the master fd set to be our listening sockfd 
-	max_fd = sockfd; // so far since we dont have any client connection, we know that the listeninf sockfd is highest fd value
+	FD_SET(stServerSock.iSocketFd, &masterfds); // we are setting the first element of the master fd set to be our listening sockfd 
+	max_fd = stServerSock.iSocketFd; // so far since we dont have any client connection, we know that the listeninf sockfd is highest fd value
 
 	// printf("newfd: %d \n", new_fd);
 	// printf("maxfd: %d \n", max_fd);
@@ -337,10 +429,10 @@ int main(int argc, char const* argv[])
 				// printf("hi \n");
 
 				// check if the activity is the listening sockfd 
-				if (i == sockfd)
+				if (i == stServerSock.iSocketFd)
 				{
 					// accept the new client connection
-					new_fd = accept(sockfd, (struct sockaddr *)&their_addr, &sin_size);
+					new_fd = accept(stServerSock.iSocketFd, (struct sockaddr *)&their_addr, &sin_size);
 
 					if(new_fd == -1)
 					{
