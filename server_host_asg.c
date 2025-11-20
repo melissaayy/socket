@@ -11,7 +11,7 @@
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
 #define MAX_CLIENT_CONN 255
-#define MAX_FILE_LOG 9999
+#define MAX_FILE_LOG 2 //9999
 
 int i8ClientSockets[MAX_CLIENT_CONN] = {}; 
 uint16_t u16NumclientConn = 0; 
@@ -52,13 +52,15 @@ int asciiToDecimal(const char *str) {
  * Input: command line parameters
  * Output: Configuration for socket and data processing 
 */ 
-struct stUserCommand stGetCommandLineInput(char const* argv[])
+struct stUserCommand stGetCommandLineInput(char const* argv[], FILE * filePtr)
 {
 	struct stUserCommand stProcessedUserCommand; 
 	char *strPortSlice; 
 	// cli param 1: size of message length 
 	stProcessedUserCommand.u16MessageLen = (uint16_t) asciiToDecimal(argv[1] + 1);
 	//printf("stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
+	fprintf(filePtr, "stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
+
 
 	// cli param 2: offset
 	stProcessedUserCommand.u16Offset = (uint16_t) asciiToDecimal(argv[2] + 1); 
@@ -76,10 +78,12 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 		// }
 	stProcessedUserCommand.cpPortNum = (argv[3] + 1); 
 	//printf("stProcessedUserCommand.cpPortNum: %s \n", stProcessedUserCommand.cpPortNum);
+	fprintf(filePtr, "stProcessedUserCommand.cpPortNum: %s \n", stProcessedUserCommand.cpPortNum);
 
 	// cli param 4: read message format 
 	stProcessedUserCommand.i8MsgFormat = asciiToDecimal(argv[4] + 1); 
 	//printf("stProcessedUserCommand.i8MsgFormat: %d \n", stProcessedUserCommand.i8MsgFormat);
+	fprintf(filePtr, "stProcessedUserCommand.i8MsgFormat: %d \n", stProcessedUserCommand.i8MsgFormat);
 
 	// cli param 5: reply to sender 
 
@@ -93,12 +97,18 @@ struct stUserCommand stGetCommandLineInput(char const* argv[])
 		stProcessedUserCommand.i8ReplyToWhichClient = DEF_CONF_REPLY_SENDER; 
 	}
 	//printf("stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
+	fprintf(filePtr, "stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
 
+	fflush(filePtr);
 	return stProcessedUserCommand; 
 }
 
-
-bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend, int max_fd)
+/*
+ * Function: Process which client to send data to based on the CLI parameter 
+ * Input: Command line parameters
+ * Output: Data sent to choosen client  
+*/ 
+bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend, int max_fd, FILE * filePtr)
 {
 	uint16_t u16BytesSent = 0; 
 	uint16_t u16TtlBytesSent = 0; 
@@ -145,6 +155,7 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 		if(u16BytesSent == -1)
 		{
 			perror("data sent to client failed");
+			fprintf(filePtr, "data sent to client failed \n");
 			boSendClientResult = false; 
 			break; 
 		}
@@ -153,6 +164,7 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 		// printf("u16BytesSent %d \n", u16BytesSent); 
 		// printf("u16TtlBytesSent %d \n", u16TtlBytesSent); 
 		// printf("u16ExLentoSend %d \n", u16ExLentoSend); 
+		fprintf(filePtr, "u16TtlBytesSent: %d \n", u16TtlBytesSent);
 
 	}
 
@@ -166,6 +178,7 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 		boSendClientResult = true; 
 	}
 
+	fflush(filePtr);
 	return boSendClientResult; 
 }
 
@@ -191,9 +204,18 @@ bool boPrint = false;
 
 int main(int argc, char const* argv[]) 
 {
+	// save the messages into a file 
+	char fileNameLog[100] = "hostsimlog"; 
+	FILE *fpDataLog = fopen(fileNameLog, "w"); 
+	if(!fpDataLog)
+	{
+		//perror("fopen fail \n");
+		fprintf(fpDataLog, "fopen fail \n"); 
+	}
+
 	// get command line configuration
 	struct stUserCommand stUserCommandConfig; 
-	stUserCommandConfig = stGetCommandLineInput(argv); 
+	stUserCommandConfig = stGetCommandLineInput(argv, fpDataLog); 
 
 	// handle socket connection
 	struct addrinfo hints, *res, *p; 
@@ -220,7 +242,8 @@ int main(int argc, char const* argv[])
 
 	if(getaddrinfo(NULL, stUserCommandConfig.cpPortNum , &hints, &res) == -1)  
 	{
-		perror("Err: get address info error \n"); 
+		//perror("Err: get address info error \n"); 
+		fprintf(fpDataLog, "Err: get address info error \n"); 
 	} 
 
 	for (p = res; p != NULL; p = p-> ai_next) 
@@ -228,7 +251,8 @@ int main(int argc, char const* argv[])
 		sockfd = socket(p -> ai_family, p -> ai_socktype , p -> ai_protocol); // ai_protocol is 0 bcuz we used AF_UNSPEC means can either be IPv4 or IPv6 and we will let it decide by itself 
 		if(sockfd == -1)
 		{ 
-			perror("Err: get sock fd error \n"); 
+			//perror("Err: get sock fd error \n"); 
+			fprintf(fpDataLog, "Err: get sock fd error \n"); 
 			continue; 
 		}
 		
@@ -237,15 +261,18 @@ int main(int argc, char const* argv[])
 		// This is part of TCP’s design to ensure all packets in flight are properly handled and avoid confusion with new connections.
 		// During TIME_WAIT, the port is not fully reusable unless you set special options.
 		int yes = 1;
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) {  
-			perror("setsockopt");
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
+		{  
+			//perror("Err: setsockopt");
+			fprintf(fpDataLog, "Err: setsockopt \n"); 
 			exit(1);
 		}
 
 		if(bind(sockfd, p->ai_addr, p-> ai_addrlen) == -1)
 		{
 			close(sockfd); 
-			perror("Err: sock binding\n"); 
+			//perror("Err: sock binding\n"); 
+			fprintf(fpDataLog, "Err: sock binding\n"); 
 			continue;
 		}
 
@@ -256,13 +283,15 @@ int main(int argc, char const* argv[])
 
 	if (p == NULL) 
 	{
-		perror("Err: server fail to bind \n");
+		//perror("Err: server fail to bind \n");
+		fprintf(fpDataLog, "Err: server fail to bind \n"); 
 		exit(1); 
 	} 
 
 	if(listen(sockfd, BACKLOG) == -1)
 	{
-		perror("Err: listen \n"); 
+		//perror("Err: listen \n"); 
+		fprintf(fpDataLog, "Err: listen \n"); 
 		exit(1); 
 	}
 
@@ -290,7 +319,8 @@ int main(int argc, char const* argv[])
 
 		if(activity == -1)
 		{
-			perror("Err: select error \n"); 
+			//perror("Err: select error \n"); 
+			fprintf(fpDataLog, "Err: select error \n"); 
 			exit(1); // meas we will exit the program 
 		}
 
@@ -314,7 +344,8 @@ int main(int argc, char const* argv[])
 
 					if(new_fd == -1)
 					{
-						perror("Err: accept error \n");
+						//perror("Err: accept error \n");
+						fprintf(fpDataLog, "Err: accept error \n"); 
 						continue; 
 					}
 
@@ -331,18 +362,21 @@ int main(int argc, char const* argv[])
 
 					inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
 					printf("server: got connection from %s\n", s);
+					fprintf(fpDataLog, "server: got connection from %s\n", s); 
 
 					// add in the new fd for the client into our array of client fds 
 					if(u16NumclientConn < MAX_CLIENT_CONN)
 					{
 						i8ClientSockets[u16NumclientConn] = new_fd; 
 						u16NumclientConn++; // increment our client number count 
-						// printf("ok i hv accepted and has set the client fd to the set \n"); 
+						//printf("ok i hv accepted and has set the client fd to the set \n"); 
+						fprintf(fpDataLog, "ok i hv accepted and has set the client fd to the set \n"); 
 					}
 
 					else
 					{
-						printf("Err: maximum number of clients reached \n"); 
+						//printf("Err: maximum number of clients reached \n"); 
+						fprintf(fpDataLog, "Err: maximum number of clients reached \n"); 
 						close(new_fd); // we close the connection since we already hit our maximum 
 					}
 
@@ -383,7 +417,8 @@ int main(int argc, char const* argv[])
 
 						if (recvdPeek <= 0)
 						{
-							printf("hrmmm \n");
+							//printf("hrmmm \n");
+							fprintf(fpDataLog, "hrmmm \n"); 
 							break;
 						}
 
@@ -392,7 +427,8 @@ int main(int argc, char const* argv[])
 
 					if(numBytesPeeked == -1) // error occured 
 					{
-						perror("Err: recv error and will close this client's connection \n");
+						//perror("Err: recv error and will close this client's connection \n");
+						fprintf(fpDataLog, "Err: recv error and will close this client's connection \n"); 
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
@@ -401,7 +437,8 @@ int main(int argc, char const* argv[])
 
 					if (numBytesPeeked == 0) // connection closed by client 
 					{
-						printf("Client disconnected, will proceed to close the fd for this client \n"); 
+						//printf("Client disconnected, will proceed to close the fd for this client \n"); 
+						fprintf(fpDataLog, "Client disconnected, will proceed to close the fd for this client \n");
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
@@ -442,12 +479,14 @@ int main(int argc, char const* argv[])
 
 					if(u16DataByteRecvd < 0)
 					{
-						printf("Err: data recv error \n");
+						//printf("Err: data recv error \n");
+						fprintf(fpDataLog, "Err: data recv error \n");
 					}
 
 					else if (u16DataByteRecvd == 0)
 					{
-						printf("client disconnected \n"); // to put into the hostsim.log 
+						//printf("client disconnected \n"); // to put into the hostsim.log 
+						fprintf(fpDataLog, "client disconnected \n");
 					}
 
 					else if (u16DataByteRecvd >= u16MsgLenExpected)
@@ -457,11 +496,11 @@ int main(int argc, char const* argv[])
 						//printf("Full message: %s\n", strToRecv); // dump the message recv into a separate file (each msg recv is an individual file, eg: hoostsimrecv.1, limit the number of file to 9999, after that rewrite file from 1)
 
 						// save the messages into a file 
-						char fileName[100];
+						char fileNameRecv[100];
 						//printf("fileNum: %d \n", fileNum);
-						snprintf(fileName, sizeof(fileName), "hostsimrecv.%d", fileNum);
+						snprintf(fileNameRecv, sizeof(fileNameRecv), "hostsimrecv.%d", fileNum);
 
-						FILE *fpDataRecv = fopen(fileName, "w"); 
+						FILE *fpDataRecv = fopen(fileNameRecv, "w"); 
 						if(!fpDataRecv)
 						{
 							perror("fopen fail \n");
@@ -482,12 +521,18 @@ int main(int argc, char const* argv[])
 					// printf("Full message: %s\n", strToRecv);
 
 					// Send response
-					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd);
+					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd, fpDataLog);
 
 				}
 			}
 		}
+
+		// flush the buffer so that the logs can be saved into the file without having to close the file 
+		fflush(fpDataLog);
 	}
 
+	fclose(fpDataLog); 
+	printf("program closing \n"); 
+	fprintf(fpDataLog, "program closing \n");
 	return 0; 
 }
