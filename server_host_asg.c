@@ -16,7 +16,6 @@
 
 int i8ClientSockets[MAX_CLIENT_CONN]; 
 uint16_t u16NumclientConn = 0; 
-// fd_set masterfds; 
 
 struct stUserCommand
 {
@@ -30,11 +29,15 @@ struct stUserCommand
 struct stCreatedSocket
 {
 	int iSocketFd;
-	//struct sockaddr_storage stClientAddr; 
 	int iListenResult;
 };
 
 
+/*
+ * Function: Logging system level error into the log file 
+ * Input: Message string and system level error  
+ * Output: Error logging to the log file  
+*/ 
 void vLogErrToFile(FILE *fp, const char* msg)
 {
 	fprintf(fp, "Err -> %s: %s \n", msg, strerror(errno)); 
@@ -73,12 +76,10 @@ struct stUserCommand stGetCommandLineInput(char const* argv[], FILE * filePtr)
 	char *strPortSlice; 
 	// cli param 1: size of message length 
 	stProcessedUserCommand.u16MessageLen = (uint16_t) asciiToDecimal(argv[1] + 1);
-	//printf("stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
 	fprintf(filePtr, "stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
 
 	// cli param 2: offset
 	stProcessedUserCommand.u16Offset = (uint16_t) asciiToDecimal(argv[2] + 1); 
-	//printf("stProcessedUserCommand.u16Offset: %d \n", stProcessedUserCommand.u16Offset);
 
 	// cli param 3: port number 
 		// strPortSlice = (char *)(argv[3]+1);  		// this is for receiving more than one port number, need more handling, thinking of using an enum 
@@ -91,12 +92,10 @@ struct stUserCommand stGetCommandLineInput(char const* argv[], FILE * filePtr)
 		//     token = strtok(NULL, ":");
 		// }
 	stProcessedUserCommand.cpPortNum = (argv[3] + 1); 
-	//printf("stProcessedUserCommand.cpPortNum: %s \n", stProcessedUserCommand.cpPortNum);
 	fprintf(filePtr, "stProcessedUserCommand.cpPortNum: %s \n", stProcessedUserCommand.cpPortNum);
 
 	// cli param 4: read message format 
 	stProcessedUserCommand.i8MsgFormat = asciiToDecimal(argv[4] + 1); 
-	//printf("stProcessedUserCommand.i8MsgFormat: %d \n", stProcessedUserCommand.i8MsgFormat);
 	fprintf(filePtr, "stProcessedUserCommand.i8MsgFormat: %d \n", stProcessedUserCommand.i8MsgFormat);
 
 	// cli param 5: reply to sender 
@@ -110,7 +109,6 @@ struct stUserCommand stGetCommandLineInput(char const* argv[], FILE * filePtr)
 	{
 		stProcessedUserCommand.i8ReplyToWhichClient = DEF_CONF_REPLY_SENDER; 
 	}
-	//printf("stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
 	fprintf(filePtr, "stProcessedUserCommand.i8ReplyToWhichClient: %d \n", stProcessedUserCommand.i8ReplyToWhichClient);
 
 	fflush(filePtr);
@@ -137,10 +135,6 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 
 	else if (u8ClientConf == 2) // send to latest connection
 	{
-		//client_fd = i8ClientSockets[u16NumclientConn-1];
-		//printf("u16NumclientConn-1: %d \n", u16NumclientConn-1); 
-		// if (client_fd == -1)
-		// {					
 		for (uint16_t j = (MAX_CLIENT_CONN - 1) ; j >= 0 ; j--)  // this we start from the end of the loop until we find a non -1 value then we break the loop 
 		{
 			if (i8ClientSockets[j] != -1) 
@@ -149,16 +143,10 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 				break; 
 			}
 		}
-
-		// }
-		// client_fd = max_fd; 
-		//u16BytesSent = send(i8ClientSockets[u16NumclientConn-1], finalToSend, strlen(finalToSend), 0 ); // this is the current client (reason is this value holds the latest connection)
-		//printf("potato \n");
 	}
 
 	else if( (u8ClientConf == 0)) // send to first available client 
 	{
-
 		// loop through the client fds array and find the first non negative 1 value 
 		for(int i = 0; i < MAX_CLIENT_CONN; i++)
 		{
@@ -169,11 +157,6 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 				break; 
 			}	
 		}
-
-		// client_fd = i8ClientSockets[0];
-		// client_fd = masterfds[1];
-		//u16BytesSent = send(i8ClientSockets[0], finalToSend, strlen(finalToSend), 0 );
-		//printf("i8ClientSockets[0]: %d \n", i8ClientSockets[0]);
 	}
 
 	// cyclically send until the expected number to send is reached 
@@ -182,17 +165,12 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 		u16BytesSent = send(client_fd, finalToSend, strlen(finalToSend), 0 );  
 		if(u16BytesSent == -1)
 		{
-			//perror("data sent to client failed");
-			// fprintf(filePtr, "data sent to client failed \n");
 			vLogErrToFile(filePtr, "Data sent to client failed "); 
 			boSendClientResult = false; 
 			break; 
 		}
 
 		u16TtlBytesSent += u16BytesSent; 
-		// printf("u16BytesSent %d \n", u16BytesSent); 
-		// printf("u16TtlBytesSent %d \n", u16TtlBytesSent); 
-		// printf("u16ExLentoSend %d \n", u16ExLentoSend); 
 		fprintf(filePtr, "u16TtlBytesSent: %d \n", u16TtlBytesSent);
 
 	}
@@ -229,8 +207,6 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 	// handle socket connection
 	struct addrinfo hints, *res, *p; 
 	int sockfd, new_fd; 
-	//struct sockaddr_storage their_addr; 
-	//socklen_t sin_size = sizeof(stServerSock.stClientAddr); 
 	char s[INET6_ADDRSTRLEN];
 	char* strToSend = "Hello from server! banana \n";
 	char* strToSendBack; 
@@ -245,8 +221,6 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 
 	if(getaddrinfo(NULL, cpPortNum , &hints, &res) == -1)  
 	{
-		//perror("Err: get address info error \n"); 
-		//fprintf(filePtr, "Err: get address info error \n"); 
 		vLogErrToFile(filePtr, "Get address info error "); 
 	} 
 
@@ -256,8 +230,6 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 		stServerSocket.iSocketFd = sockfd;
 		if(sockfd == -1)
 		{ 
-			//perror("Err: get sock fd error \n"); 
-			// fprintf(filePtr, "Err: get sock fd error \n"); 
 			vLogErrToFile(filePtr, "Get sock fd error "); 
 			continue; 
 		}
@@ -269,8 +241,6 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 		int yes = 1;
 		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
 		{  
-			//perror("Err: setsockopt");
-			// fprintf(filePtr, "Err: setsockopt \n"); 
 			vLogErrToFile(filePtr, "Setsockopt error when freeing the port"); 			
 			exit(1);
 		}
@@ -278,8 +248,6 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 		if(bind(sockfd, p->ai_addr, p-> ai_addrlen) == -1)
 		{
 			close(sockfd); 
-			//perror("Err: sock binding\n"); 
-			// fprintf(filePtr, "Err: sock binding\n"); 
 			vLogErrToFile(filePtr, "Socket port binding error"); 			
 			continue;
 		}
@@ -291,8 +259,6 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 
 	if (p == NULL) 
 	{
-		//perror("Err: server fail to bind \n");
-		//fprintf(filePtr, "Err: server fail to bind \n"); 
 		vLogErrToFile(filePtr, "No socket created"); 			
 		exit(1); 
 	} 
@@ -329,8 +295,6 @@ int main(int argc, char const* argv[])
 	FILE *fpDataLog = fopen(fileNameLog, "w"); 
 	if(!fpDataLog)
 	{
-		//perror("fopen fail \n");
-		//fprintf(fpDataLog, "fopen fail \n"); 
 		vLogErrToFile(fpDataLog, "Failed to open log file"); 			
 	}
 
@@ -346,8 +310,6 @@ int main(int argc, char const* argv[])
 
 	if(stServerSock.iListenResult == -1)
 	{
-		//perror("Err: listen \n"); 
-		// fprintf(fpDataLog, "Err: listen \n"); 
 		vLogErrToFile(fpDataLog, "Listening socket error"); 			
 		exit(1); 
 	}
@@ -360,10 +322,6 @@ int main(int argc, char const* argv[])
 	FD_SET(stServerSock.iSocketFd, &masterfds); // we are setting the first element of the master fd set to be our listening sockfd (Note: max element for FD_SET is 1024 )
 	max_fd = stServerSock.iSocketFd; // so far since we dont have any client connection, we know that the listeninf sockfd is highest fd value
 
-	// printf("newfd: %d \n", new_fd);
-	// printf("maxfd: %d \n", max_fd);
-	// printf("sockfd: %d \n", sockfd); 
-
 	// now we want to process incoming connections and the data recv from connected clients 
 	while (1)
 	{
@@ -375,12 +333,8 @@ int main(int argc, char const* argv[])
 		int activity = select(max_fd+1, &readfds, NULL, NULL, NULL); // the last 3 parameter is false as we dont monitor for write, exception
 																     // and dont want to set any timeout, now is wait infinitely 
 		
-		// printf("new activity detected: %d \n", activity);
-
 		if(activity == -1)
 		{
-			//perror("Err: select error \n"); 
-			//fprintf(fpDataLog, "Err: select error \n"); 
 			vLogErrToFile(fpDataLog, "Socket select error"); 			
 
 			exit(1); // meas we will exit the program 
@@ -389,15 +343,11 @@ int main(int argc, char const* argv[])
 		// now we have an update set of fd, which includes the server's sockfd and the clients fd 
 		// we will want to process them to know whether any new connection or existing connections 
 		// have any activity, we use the FD_ISSET to check, as long as any is set means there is actions 
-
 		for(int i = 0; i <= max_fd; i++)
 		{
-			//printf("i = %d \n", i);
 			// check if there are any activity 
 			if(FD_ISSET(i, &readfds)) 
 			{
-				// printf("hi \n");
-
 				// check if the activity is the listening sockfd 
 				if (i == stServerSock.iSocketFd)
 				{
@@ -406,8 +356,6 @@ int main(int argc, char const* argv[])
 
 					if(new_fd == -1)
 					{
-						//perror("Err: accept error \n");
-						//fprintf(fpDataLog, "Err: accept error \n"); 
 						vLogErrToFile(fpDataLog, "Socket accpet error"); 			
 						continue; 
 					}
@@ -419,12 +367,7 @@ int main(int argc, char const* argv[])
 						max_fd = new_fd; 
 					}
 
-					// printf("newfd: %d \n", new_fd);
-					// printf("maxfd: %d \n", max_fd);
-					// printf("sockfd: %d \n", sockfd); 
-
 					inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
-					//printf("server: got connection from %s\n", s);
 					fprintf(fpDataLog, "server: got connection from %s\n", s); 
 
 					bool boMaxClientReached = true; 
@@ -434,70 +377,45 @@ int main(int argc, char const* argv[])
 					{
 						if(i8ClientSockets[k] == -1)
 						{
-							//printf("k: %d \n", k); 
 							i8ClientSockets[k] = new_fd; 
 							boMaxClientReached = false; 
-							//printf("i8ClientSockets[%d]: %d \n", k , i8ClientSockets[k]); 
 							break; 
 						}
 					}
 
 					if (boMaxClientReached == true)
 					{
-						// printf("Err: maximum number of clients reached \n"); 
 						fprintf(fpDataLog, "Err: maximum number of clients reached \n"); 
 						close(new_fd); // we close the connection since we already hit our maximum 
 					}
-
-					// printf("ok im done with setting the client fd to the set \n"); 
 				}
 			
 				// if there is activity but not the server's socket's fd
 				// this means that our connected client have information for us 
 				else
 				{
-					// printf("ok recv data from client \n"); 
 					char strToPeek[stUserCommandConfig.u16Offset+1000]; // making sure our peek buffer is bigger than the offset length
 
 					uint16_t numBytesPeeked = 0; 
-
-					// we will recv the information from the client 
-					//umBytesPeeked = recv(i, strToPeek, sizeof(strToPeek), MSG_PEEK); // TODO: mels need to do handling for offset != 0, might hv case where data len recv is less than the offset
-																					// 		 this means that the data do not contain any length information 
-					
-					// printf("right outside while loop \n"); 
-					// printf("stUserCommandConfig.u16Offset: %d \n", stUserCommandConfig.u16Offset);
-
 					uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
 
 					while (numBytesPeeked < u16ExNumBytesHeader) 
 					{
-						// printf("right inside while loop \n"); 
-
-						//select(i+1, &readfds, NULL, NULL, NULL); 
-						// printf("right inside while loop, after select \n"); 
-
 						// consume the data in the OS buffer 
 						int recvdPeek = recv(i, strToPeek + numBytesPeeked, u16ExNumBytesHeader - numBytesPeeked, MSG_PEEK);
 						numBytesPeeked += recvdPeek;
-						// printf("recvdPeek: %d \n", recvdPeek); 
-						// printf("numBytesPeeked: %d \n", numBytesPeeked); 
-						// printf("u16ExNumBytesHeader %d \n", u16ExNumBytesHeader); 
 
 						if (recvdPeek <= 0)
 						{
-							//printf("hrmmm \n");
-							fprintf(fpDataLog, "hrmmm \n"); 
+							// fprintf(fpDataLog, "hrmmm \n"); 
+							vLogErrToFile(fpDataLog, "Socket receive error"); 
 							break;
 						}
 
-						// printf("im inside the bytes extraction loop \n");
 					}
 
 					if(numBytesPeeked == -1) // error occured 
 					{
-						//perror("Err: recv error and will close this client's connection \n");
-						// fprintf(fpDataLog, "Err: recv error and will close this client's connection \n"); 
 						vLogErrToFile(fpDataLog, "Server receive error"); 			
 						close(i); 
 						// clear this client's fd from the set 
@@ -509,8 +427,6 @@ int main(int argc, char const* argv[])
 							if (i8ClientSockets[k] == i)
 							{
 								i8ClientSockets[k] = -1;
-								//printf("i8ClientSockets[%d]: %d \n", k , i8ClientSockets[k]); 
-
 								break; 
 							}
 						}
@@ -519,7 +435,6 @@ int main(int argc, char const* argv[])
 
 					if (numBytesPeeked == 0) // connection closed by client 
 					{
-						//printf("Client disconnected, will proceed to close the fd for this client \n"); 
 						fprintf(fpDataLog, "Client disconnected, will proceed to close the fd for this client \n");
 						close(i); 
 						// clear this client's fd from the set 
@@ -531,8 +446,6 @@ int main(int argc, char const* argv[])
 							if (i8ClientSockets[k] == i)
 							{
 								i8ClientSockets[k] = -1;
-
-								//printf("i8ClientSockets[%d]: %d \n", k , i8ClientSockets[k]); 
 								break; 
 							}
 						}
@@ -554,50 +467,37 @@ int main(int argc, char const* argv[])
 					uint16_t u16DataByteRecvd = 0;
 					while (u16DataByteRecvd < u16MsgLenExpected) 
 					{
-						//select(i+1, &readfds, NULL, NULL, NULL); 
-
 						// consume the data in the OS buffer 
 						int recvd = recv(i, strToRecv + u16DataByteRecvd, u16MsgLenExpected - u16DataByteRecvd, 0);
 						if (recvd <= 0)
 						{
+							vLogErrToFile(fpDataLog, "Socket receive error"); 
 							break;
 						}
 						u16DataByteRecvd += recvd;
-						// printf("recvd: %d \n", recvd); 
-						// printf("u16DataByteRecvd: %d \n", u16DataByteRecvd); 
-						// printf("u16MsgLenExpected: %d \n", u16MsgLenExpected); 
-						//printf("im inside the bytes extraction loop \n");
 					}
-
-					//strToRecv[u16MsgLenExpected] = '\0'; // null terminate the string 
 
 					if(u16DataByteRecvd < 0)
 					{
-						//printf("Err: data recv error \n");
 						fprintf(fpDataLog, "Err: data recv error \n");
 					}
 
 					else if (u16DataByteRecvd == 0)
 					{
-						//printf("client disconnected \n"); // to put into the hostsim.log 
 						fprintf(fpDataLog, "client disconnected \n");
 					}
 
 					else if (u16DataByteRecvd >= u16MsgLenExpected)
 					{
-						// printf("extracted the data based on the length and the offset ooo \n");
 						strToRecv[u16DataByteRecvd] = '\0';
-						//printf("Full message: %s\n", strToRecv); // dump the message recv into a separate file (each msg recv is an individual file, eg: hoostsimrecv.1, limit the number of file to 9999, after that rewrite file from 1)
 
 						// save the messages into a file 
 						char fileNameRecv[100];
-						//printf("fileNum: %d \n", fileNum);
 						snprintf(fileNameRecv, sizeof(fileNameRecv), "hostsimrecv.%d", fileNum);
 
 						FILE *fpDataRecv = fopen(fileNameRecv, "w"); 
 						if(!fpDataRecv)
 						{
-							//perror("fopen fail \n");
 							vLogErrToFile(fpDataLog, "Failed to open data log file"); 			
 						}
 
@@ -611,10 +511,7 @@ int main(int argc, char const* argv[])
 						fileNum++; 
 					}
 
-					// printf("extracted the data based on the length and the offset ooo \n");
-					// strToRecv[u16DataByteRecvd] = '\0';
-					//printf("Full message: %s\n", strToRecv);
-
+					//printf("full message recvd: %s \n", strToRecv); 
 					// Send response
 					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd, fpDataLog);
 
@@ -627,7 +524,6 @@ int main(int argc, char const* argv[])
 	}
 
 	fclose(fpDataLog); 
-	//printf("program closing \n"); 
 	fprintf(fpDataLog, "program closing \n");
 	return 0; 
 }
