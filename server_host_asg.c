@@ -7,6 +7,7 @@
 #include <unistd.h> 
 #include <stdint.h>
 #include <stdbool.h>
+#include <errno.h>
 
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
@@ -32,6 +33,13 @@ struct stCreatedSocket
 	//struct sockaddr_storage stClientAddr; 
 	int iListenResult;
 };
+
+
+void vLogErrToFile(FILE *fp, const char* msg)
+{
+	fprintf(fp, "Err -> %s: %s \n", msg, strerror(errno)); 
+	fflush(fp); 
+}
 
 /*
  * Function: Converting numbers in ASCII format to decimal
@@ -67,7 +75,6 @@ struct stUserCommand stGetCommandLineInput(char const* argv[], FILE * filePtr)
 	stProcessedUserCommand.u16MessageLen = (uint16_t) asciiToDecimal(argv[1] + 1);
 	//printf("stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
 	fprintf(filePtr, "stProcessedUserCommand.u16MessageLen: %d \n", stProcessedUserCommand.u16MessageLen);
-
 
 	// cli param 2: offset
 	stProcessedUserCommand.u16Offset = (uint16_t) asciiToDecimal(argv[2] + 1); 
@@ -176,7 +183,8 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 		if(u16BytesSent == -1)
 		{
 			//perror("data sent to client failed");
-			fprintf(filePtr, "data sent to client failed \n");
+			// fprintf(filePtr, "data sent to client failed \n");
+			vLogErrToFile(filePtr, "Data sent to client failed "); 
 			boSendClientResult = false; 
 			break; 
 		}
@@ -238,7 +246,8 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 	if(getaddrinfo(NULL, cpPortNum , &hints, &res) == -1)  
 	{
 		//perror("Err: get address info error \n"); 
-		fprintf(filePtr, "Err: get address info error \n"); 
+		//fprintf(filePtr, "Err: get address info error \n"); 
+		vLogErrToFile(filePtr, "Get address info error "); 
 	} 
 
 	for (p = res; p != NULL; p = p-> ai_next) 
@@ -248,7 +257,8 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 		if(sockfd == -1)
 		{ 
 			//perror("Err: get sock fd error \n"); 
-			fprintf(filePtr, "Err: get sock fd error \n"); 
+			// fprintf(filePtr, "Err: get sock fd error \n"); 
+			vLogErrToFile(filePtr, "Get sock fd error "); 
 			continue; 
 		}
 		
@@ -260,7 +270,8 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(int)) == -1) 
 		{  
 			//perror("Err: setsockopt");
-			fprintf(filePtr, "Err: setsockopt \n"); 
+			// fprintf(filePtr, "Err: setsockopt \n"); 
+			vLogErrToFile(filePtr, "Setsockopt error when freeing the port"); 			
 			exit(1);
 		}
 
@@ -268,7 +279,8 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 		{
 			close(sockfd); 
 			//perror("Err: sock binding\n"); 
-			fprintf(filePtr, "Err: sock binding\n"); 
+			// fprintf(filePtr, "Err: sock binding\n"); 
+			vLogErrToFile(filePtr, "Socket port binding error"); 			
 			continue;
 		}
 
@@ -280,7 +292,8 @@ struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u1
 	if (p == NULL) 
 	{
 		//perror("Err: server fail to bind \n");
-		fprintf(filePtr, "Err: server fail to bind \n"); 
+		//fprintf(filePtr, "Err: server fail to bind \n"); 
+		vLogErrToFile(filePtr, "No socket created"); 			
 		exit(1); 
 	} 
 
@@ -317,7 +330,8 @@ int main(int argc, char const* argv[])
 	if(!fpDataLog)
 	{
 		//perror("fopen fail \n");
-		fprintf(fpDataLog, "fopen fail \n"); 
+		//fprintf(fpDataLog, "fopen fail \n"); 
+		vLogErrToFile(fpDataLog, "Failed to open log file"); 			
 	}
 
 	// get command line configuration
@@ -333,7 +347,8 @@ int main(int argc, char const* argv[])
 	if(stServerSock.iListenResult == -1)
 	{
 		//perror("Err: listen \n"); 
-		fprintf(fpDataLog, "Err: listen \n"); 
+		// fprintf(fpDataLog, "Err: listen \n"); 
+		vLogErrToFile(fpDataLog, "Listening socket error"); 			
 		exit(1); 
 	}
 
@@ -365,7 +380,9 @@ int main(int argc, char const* argv[])
 		if(activity == -1)
 		{
 			//perror("Err: select error \n"); 
-			fprintf(fpDataLog, "Err: select error \n"); 
+			//fprintf(fpDataLog, "Err: select error \n"); 
+			vLogErrToFile(fpDataLog, "Socket select error"); 			
+
 			exit(1); // meas we will exit the program 
 		}
 
@@ -390,7 +407,8 @@ int main(int argc, char const* argv[])
 					if(new_fd == -1)
 					{
 						//perror("Err: accept error \n");
-						fprintf(fpDataLog, "Err: accept error \n"); 
+						//fprintf(fpDataLog, "Err: accept error \n"); 
+						vLogErrToFile(fpDataLog, "Socket accpet error"); 			
 						continue; 
 					}
 
@@ -479,7 +497,8 @@ int main(int argc, char const* argv[])
 					if(numBytesPeeked == -1) // error occured 
 					{
 						//perror("Err: recv error and will close this client's connection \n");
-						fprintf(fpDataLog, "Err: recv error and will close this client's connection \n"); 
+						// fprintf(fpDataLog, "Err: recv error and will close this client's connection \n"); 
+						vLogErrToFile(fpDataLog, "Server receive error"); 			
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
@@ -578,7 +597,8 @@ int main(int argc, char const* argv[])
 						FILE *fpDataRecv = fopen(fileNameRecv, "w"); 
 						if(!fpDataRecv)
 						{
-							perror("fopen fail \n");
+							//perror("fopen fail \n");
+							vLogErrToFile(fpDataLog, "Failed to open data log file"); 			
 						}
 
 						fprintf(fpDataRecv, "%s", strToRecv); 
@@ -593,7 +613,7 @@ int main(int argc, char const* argv[])
 
 					// printf("extracted the data based on the length and the offset ooo \n");
 					// strToRecv[u16DataByteRecvd] = '\0';
-					// printf("Full message: %s\n", strToRecv);
+					//printf("Full message: %s\n", strToRecv);
 
 					// Send response
 					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd, fpDataLog);
