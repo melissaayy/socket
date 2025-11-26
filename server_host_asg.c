@@ -11,11 +11,12 @@
 
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
-#define MAX_CLIENT_CONN 255
+#define MAX_CLIENT_CONN 3
 #define MAX_FILE_LOG 2 //9999
 
-int i8ClientSockets[MAX_CLIENT_CONN]; 
 uint16_t u16NumclientConn = 0; 
+// fd_set masterfds; 
+// int max_fd; 
 
 struct stUserCommand
 {
@@ -120,11 +121,24 @@ struct stUserCommand stGetCommandLineInput(char const* argv[], FILE * filePtr)
  * Input: Command line parameters
  * Output: Data sent to choosen client  
 */ 
-bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend, int max_fd, FILE * filePtr)
+bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_fd, uint16_t u16ExLentoSend, int max_fd, FILE * filePtr, int serverFd, fd_set *masterfds)
 {
 	uint16_t u16BytesSent = 0; 
 	uint16_t u16TtlBytesSent = 0; 
 	bool boSendClientResult = false; 
+
+	int first_fd = -1;
+	int latest_fd = -1;
+
+	for (int j = 0; j <= max_fd; j++) {
+		if (FD_ISSET(j, masterfds)) {
+			if ((first_fd == -1) && (j != serverFd))
+			{
+				first_fd = j; // first active fd
+			}
+			latest_fd = j; // keep updating for last active fd
+		}
+	}
 
 	if(u8ClientConf == DEF_CONF_REPLY_SENDER)
 	{
@@ -135,44 +149,30 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
 
 	else if (u8ClientConf == 2) // send to latest connection
 	{
-		for (uint16_t j = (MAX_CLIENT_CONN - 1) ; j >= 0 ; j--)  // this we start from the end of the loop until we find a non -1 value then we break the loop 
-		{
-			if (i8ClientSockets[j] != -1) 
-			{
-				client_fd = i8ClientSockets[j];
-				break; 
-			}
-		}
+		client_fd = latest_fd; 
 	}
 
 	else if( (u8ClientConf == 0)) // send to first available client 
 	{
-		// loop through the client fds array and find the first non negative 1 value 
-		for(int i = 0; i < MAX_CLIENT_CONN; i++)
-		{
-			// not -1 means that there is a valid client fd 
-			if(i8ClientSockets[i] != -1)
-			{
-				client_fd = i8ClientSockets[i];
-				break; 
-			}	
-		}
+		client_fd = first_fd; 
 	}
 
-	// cyclically send until the expected number to send is reached 
-	while (u16TtlBytesSent < u16ExLentoSend)
+	if((client_fd != -1) && FD_ISSET(client_fd, masterfds)) // to ensure that the client_fd is still valid and no disconnection has occured
 	{
-		u16BytesSent = send(client_fd, finalToSend, strlen(finalToSend), 0 );  
-		if(u16BytesSent == -1)
+		// cyclically send until the expected number to send is reached 
+		while (u16TtlBytesSent < u16ExLentoSend)
 		{
-			vLogErrToFile(filePtr, "Data sent to client failed "); 
-			boSendClientResult = false; 
-			break; 
+			u16BytesSent = send(client_fd, finalToSend, strlen(finalToSend), 0 );  
+			if(u16BytesSent == -1)
+			{
+				vLogErrToFile(filePtr, "Data sent to client failed "); 
+				boSendClientResult = false; 
+				break; 
+			}
+
+			u16TtlBytesSent += u16BytesSent; 
+			fprintf(filePtr, "u16TtlBytesSent: %d \n", u16TtlBytesSent);
 		}
-
-		u16TtlBytesSent += u16BytesSent; 
-		fprintf(filePtr, "u16TtlBytesSent: %d \n", u16TtlBytesSent);
-
 	}
 
 	if(u16BytesSent == -1)
@@ -195,13 +195,7 @@ bool processSendToWhichClient(int u8ClientConf , char * finalToSend, int client_
  * Output: Listening port result 
 */ 
 struct stCreatedSocket iSetupListeningSocket(const char * cpPortNum, uint16_t u16MessageLen, FILE * filePtr) // struct sockaddr_storage * pClientAddr)
-{
-	// initialise the array used to store all the client's Fd 
-	for (int i = 0; i < MAX_CLIENT_CONN; i++)
-	{
-		i8ClientSockets[i] = -1; 
-	}
-	
+{	
 	struct stCreatedSocket stServerSocket; 
 
 	// handle socket connection
@@ -352,7 +346,7 @@ int main(int argc, char const* argv[])
 				if (i == stServerSock.iSocketFd)
 				{
 					// accept the new client connection
-					new_fd = accept(stServerSock.iSocketFd, (struct sockaddr *)&their_addr, &sin_size);
+					new_fd = accept(stServerSock.iSocketFd, (struct sockaddr *)&their_addr, &sin_size); 
 
 					if(new_fd == -1)
 					{
@@ -361,7 +355,9 @@ int main(int argc, char const* argv[])
 					}
 
 					// save the new client's fd to the set 
-					FD_SET(new_fd, &masterfds); 
+					FD_SET(new_fd, &masterfds);
+					u16NumclientConn++;
+					// printf("i: %d, new_fd: %d \n", i, new_fd); 
 					if(new_fd > max_fd) // keep track of the max fd in the set 
 					{
 						max_fd = new_fd; 
@@ -370,23 +366,23 @@ int main(int argc, char const* argv[])
 					inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), s, sizeof s);
 					fprintf(fpDataLog, "server: got connection from %s\n", s); 
 
-					bool boMaxClientReached = true; 
-
-					// add in the new fd for the client into our array of client fds 
-					for (int k = 0; k < MAX_CLIENT_CONN; k++)
-					{
-						if(i8ClientSockets[k] == -1)
-						{
-							i8ClientSockets[k] = new_fd; 
-							boMaxClientReached = false; 
-							break; 
-						}
-					}
-
-					if (boMaxClientReached == true)
+					if (u16NumclientConn > MAX_CLIENT_CONN)
 					{
 						fprintf(fpDataLog, "Err: maximum number of clients reached \n"); 
+						printf("Err: maximum number of clients reached \n"); 
+						printf("new_fd: %d, listening fd: %d \n", new_fd, stServerSock.iSocketFd);
 						close(new_fd); // we close the connection since we already hit our maximum 
+						
+						FD_CLR(new_fd, &masterfds);
+						u16NumclientConn--; 
+						if (new_fd == max_fd) 
+						{
+							while (!FD_ISSET(max_fd, &masterfds) && max_fd > 0) 
+							{
+								max_fd--;
+							}
+						}
+
 					}
 				}
 			
@@ -398,7 +394,6 @@ int main(int argc, char const* argv[])
 
 					uint16_t numBytesPeeked = 0; 
 					uint16_t u16ExNumBytesHeader = stUserCommandConfig.u16Offset + stUserCommandConfig.u16MessageLen; 
-
 					while (numBytesPeeked < u16ExNumBytesHeader) 
 					{
 						// consume the data in the OS buffer 
@@ -421,15 +416,18 @@ int main(int argc, char const* argv[])
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
 
-						// clear this client's fd in the client fd array 
-						for (int k = 0; k < MAX_CLIENT_CONN; k++)
+						// reduce the number of client connection  
+						u16NumclientConn--; 
+
+						// check the max_fd 
+						if (i == max_fd) 
 						{
-							if (i8ClientSockets[k] == i)
+							while (!FD_ISSET(max_fd, &masterfds) && max_fd > 0) 
 							{
-								i8ClientSockets[k] = -1;
-								break; 
+								max_fd--;
 							}
 						}
+
 						break; 
 					}
 
@@ -439,20 +437,20 @@ int main(int argc, char const* argv[])
 						close(i); 
 						// clear this client's fd from the set 
 						FD_CLR(i, &masterfds);
-						
-						// clear this client's fd in the client fd array 
-						for (int k = 0; k < MAX_CLIENT_CONN; k++)
+
+						// reduce the counter for number of clients connected
+						u16NumclientConn--;
+
+						if (i == max_fd) 
 						{
-							if (i8ClientSockets[k] == i)
+							while (!FD_ISSET(max_fd, &masterfds) && max_fd > 0) 
 							{
-								i8ClientSockets[k] = -1;
-								break; 
+								max_fd--;
 							}
 						}
+
 						break; 
 					}
-
-					// printf("recv and no error for now \n");
 
 					// processing the number of bytes to read 
 					char cMsgAfterOffset[255], cMsgLenConf[255];
@@ -513,7 +511,7 @@ int main(int argc, char const* argv[])
 
 					//printf("full message recvd: %s \n", strToRecv); 
 					// Send response
-					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd, fpDataLog);
+					processSendToWhichClient(stUserCommandConfig.i8ReplyToWhichClient, strToRecv, i, u16MsgLenExpected, max_fd, fpDataLog, stServerSock.iSocketFd, &masterfds);
 
 				}
 			}
