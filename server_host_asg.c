@@ -11,8 +11,8 @@
 
 #define BACKLOG 10 
 #define DEF_CONF_REPLY_SENDER 1
-#define MAX_CLIENT_CONN 3
-#define MAX_FILE_LOG 2 //9999
+#define MAX_CLIENT_CONN 255
+#define MAX_FILE_LOG 9999
 
 uint16_t u16NumclientConn = 0; 
 // fd_set masterfds; 
